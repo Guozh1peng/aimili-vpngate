@@ -60,7 +60,7 @@ def resolve_dns_over_tun0(host: str, dns_server: str = "8.8.8.8", timeout: float
     qtype_qclass = b"\x00\x01\x00\x01"
     packet = tx_id + flags + questions + rrs + qname + qtype_qclass
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.settimeout(timeout)
         tun = tun_device or TUN_DEVICE
