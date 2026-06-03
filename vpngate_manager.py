@@ -3422,6 +3422,7 @@ async function disconnectNode(){
 }
 
 function openMultiProxyModal() {
+  $("admin_dropdown").style.display = "none";
   $("multi_proxy_modal").classList.add("active");
   loadMultiProxyInstances();
 }
@@ -4166,7 +4167,7 @@ def save_multi_proxy_config(config: list[dict[str, Any]]) -> None:
     config_file.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
 def get_next_tun_index() -> int:
-    used_indexes = {1}
+    used_indexes = {0}
     for inst in multi_proxy_instances.values():
         tun_dev = inst.get("tun_device", "")
         if tun_dev.startswith("tun"):
@@ -5000,12 +5001,16 @@ class Handler(BaseHTTPRequestHandler):
                 
                 ok = start_multi_proxy_instance(instance_id, node_id, proxy_port, tun_device)
                 if ok:
+                    inst = multi_proxy_instances.get(instance_id, {})
                     config = load_multi_proxy_config()
                     config.append({
                         "id": instance_id,
                         "node_id": node_id,
                         "proxy_port": proxy_port,
-                        "tun_device": tun_device
+                        "tun_device": tun_device,
+                        "country": inst.get("country", ""),
+                        "ip": inst.get("ip", ""),
+                        "location": inst.get("location", "")
                     })
                     save_multi_proxy_config(config)
                     self.send_json({"ok": True, "instance_id": instance_id, "proxy_port": proxy_port})
