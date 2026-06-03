@@ -35,6 +35,18 @@ bash <(curl -Ls https://raw.githubusercontent.com/Guozh1peng/aimili-vpngate/bate
 
 ---
 
+### 🗑️ 一键卸载
+
+如需完全卸载 AimiliVPN，请执行：
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/Guozh1peng/aimili-vpngate/main/uninstall.sh)
+```
+
+> ⚠️ **警告**：卸载将删除所有配置、节点数据和代理服务，请谨慎操作。
+
+---
+
 ### 🛠️ 核心功能一览
 * **一键傻瓜化部署**：全自动配置运行环境，生成随机安全凭证，支持主流 Linux 系统（含轻量化 Alpine）。
 * **极简双效网关**：内置代理服务器在单一端口同时提供 HTTP 和 SOCKS5 代理服务（默认端口 `7928`）。
@@ -107,6 +119,18 @@ bash <(curl -Ls https://raw.githubusercontent.com/Guozh1peng/aimili-vpngate/bate
 ```
 
 > 💡 **Quick Note**: Once installed, copy the printed URL from the terminal to access the Web UI. Type the `ml` command in the terminal to summon the interactive CLI management console.
+
+---
+
+### 🗑️ Uninstall
+
+To completely remove AimiliVPN:
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/Guozh1peng/aimili-vpngate/main/uninstall.sh)
+```
+
+> ⚠️ **Warning**: This will remove all configurations, node data, and proxy services.
 
 ---
 
