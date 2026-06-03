@@ -4252,6 +4252,9 @@ def get_next_proxy_port() -> int:
     used_ports = {LOCAL_PROXY_PORT}
     for inst in multi_proxy_instances.values():
         used_ports.add(inst.get("proxy_port", 0))
+    config = load_multi_proxy_config()
+    for inst in config:
+        used_ports.add(inst.get("proxy_port", 0))
     for port in range(7929, 8000):
         if port not in used_ports:
             return port

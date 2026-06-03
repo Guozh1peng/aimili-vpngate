@@ -484,6 +484,10 @@ def print_status():
         except Exception:
             pass
     
+    total_connections = 0
+    if active_ip:
+        total_connections += 1
+    
     if multi_proxies:
         print_line()
         print_line("【多出口代理实例】")
@@ -494,7 +498,11 @@ def print_status():
             port_ok = check_port_listening(mp_port)
             mp_status = f"{green}[运行中]{reset}" if port_ok else f"{red}[已停止]{reset}"
             print_line(format_line(f"端口 {mp_port} ({mp_country})", mp_status))
+            if port_ok:
+                total_connections += 1
     
+    print_line()
+    print_line(format_line("总连接数", f"{green}{total_connections}{reset}" if total_connections > 0 else f"{red}0{reset}"))
     print_line("=======================================================")
 
 def run_service_cmd(cmd):
