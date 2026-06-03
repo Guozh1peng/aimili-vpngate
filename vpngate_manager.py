@@ -3094,9 +3094,30 @@ function stableSortNodes() {
 function render(){
   const activeNodeId = state.active_openvpn_node_id;
   const activeNode = nodes.find(n => n && (n.active || n.id === activeNodeId));
+  const multiProxies = state.multi_proxies || [];
   
-  // Render separated Active Node Card
   const activeCardContainer = $("active_node_card");
+  
+  const connectedNodes = [];
+  if (activeNode) {
+    connectedNodes.push({
+      ...activeNode,
+      proxyPort: state.proxy_port || 7928,
+      isMain: true
+    });
+  }
+  multiProxies.forEach(mp => {
+    const node = nodes.find(n => n && n.id === mp.node_id);
+    if (node) {
+      connectedNodes.push({
+        ...node,
+        proxyPort: mp.proxy_port,
+        instanceId: mp.id,
+        isMain: false
+      });
+    }
+  });
+  
   if (state.is_connecting && !activeNode) {
     activeCardContainer.innerHTML = `
       <div class="active-card" style="background: var(--bg-surface); border-color: var(--warning); box-shadow: 0 0 15px rgba(245, 158, 11, 0.15);">
@@ -3116,38 +3137,42 @@ function render(){
         </div>
       </div>
     `;
-  } else if (activeNode) {
-    const latencyClass = getLatencyClass(activeNode.latency_ms);
-    const latencyText = activeNode.latency_ms ? `<span class="latency-val ${latencyClass}">${activeNode.latency_ms} ms</span>` : "-";
-    const displayLocation = activeNode.location || translateCountry(activeNode.country) || "-";
-    activeCardContainer.innerHTML = `
-      <div class="active-card">
-        <div class="active-card-info">
-          <div class="stat-icon-wrapper" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); width: 48px; height: 48px; border-radius: 12px;">
-            <svg xmlns="http://www.w3.org/2000/svg" class="stat-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" style="color: #34d399; width: 24px; height: 24px;"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+  } else if (connectedNodes.length > 0) {
+    activeCardContainer.innerHTML = connectedNodes.map((node, idx) => {
+      const latencyClass = getLatencyClass(node.latency_ms);
+      const latencyText = node.latency_ms ? `<span class="latency-val ${latencyClass}">${node.latency_ms} ms</span>` : "-";
+      const displayLocation = node.location || translateCountry(node.country) || "-";
+      const mainBadge = node.isMain ? '<span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border-color: rgba(99, 102, 241, 0.3); margin-left: 8px;">主出口</span>' : '';
+      
+      return `
+        <div class="active-card" style="${idx > 0 ? 'margin-top: 12px;' : ''}">
+          <div class="active-card-info">
+            <div class="stat-icon-wrapper" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); width: 48px; height: 48px; border-radius: 12px;">
+              <svg xmlns="http://www.w3.org/2000/svg" class="stat-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" style="color: #34d399; width: 24px; height: 24px;"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+            </div>
+            <div class="active-card-details">
+              <div class="active-card-title">
+                <span class="badge available"><span class="badge-pulse"></span>已连接</span>
+                <strong>${esc(translateCountry(node.country))} 节点</strong>${mainBadge}
+              </div>
+              <div class="active-card-value mono" style="font-size: 20px; margin-top: 2px;">
+                ${esc(node.ip || node.remote_host)}:${node.remote_port || ""}
+              </div>
+              <div class="active-card-meta" style="margin-top: 4px;">
+                <span style="color: var(--primary); font-weight: 600;">代理端口: ${node.proxyPort}</span>
+                <span style="margin-left: 12px;">位置: <strong>${esc(displayLocation)}</strong></span>
+                <span style="margin-left: 12px;">延时: <strong>${latencyText}</strong></span>
+                <span style="margin-left: 12px;">IP 类型: <strong>${esc(translateIpType(node.ip_type))}</strong></span>
+              </div>
+            </div>
           </div>
-          <div class="active-card-details">
-            <div class="active-card-title">
-              <span class="badge available"><span class="badge-pulse"></span>已连接</span>
-              <strong>${esc(translateCountry(activeNode.country))} 节点</strong>
-            </div>
-            <div class="active-card-value mono" style="font-size: 20px; margin-top: 2px;">
-              ${esc(activeNode.ip || activeNode.remote_host)}:${activeNode.remote_port || ""}
-            </div>
-            <div class="active-card-meta" style="margin-top: 4px;">
-              <span>物理位置: <strong>${esc(displayLocation)}</strong></span>
-              <span style="margin-left: 12px;">延时: <strong>${latencyText}</strong></span>
-              <span style="margin-left: 12px;">运营主体: <strong>${esc(activeNode.owner || activeNode.as_name || "-")}</strong></span>
-              <span style="margin-left: 12px;">IP 类型: <strong>${esc(translateIpType(activeNode.ip_type))}</strong></span>
-            </div>
-          </div>
+          <button class="btn-danger" style="height: 38px; padding: 0 16px; border-radius: 8px;" onclick="${node.isMain ? 'disconnectNode()' : `stopMultiProxyInstance('${node.instanceId}')`}">
+            <svg xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            断开连接
+          </button>
         </div>
-        <button class="btn-danger" style="height: 38px; padding: 0 16px; border-radius: 8px;" onclick="disconnectNode()">
-          <svg xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          断开连接
-        </button>
-      </div>
-    `;
+      `;
+    }).join("");
   } else {
     activeCardContainer.innerHTML = `
       <div class="active-card" style="background: var(--bg-surface); border-color: var(--border-color); box-shadow: none;">
@@ -3157,10 +3182,10 @@ function render(){
           </div>
           <div class="active-card-details">
             <div class="active-card-title" style="color: var(--text-secondary);">
-              <span class="badge unavailable" style="padding: 2px 8px;">未连接</span> 当前未连接 VPN 节点
+              <span class="badge unavailable" style="padding: 2px 8px;">未连接</span> 当前未连接任何 VPN 节点
             </div>
             <div class="active-card-meta" style="margin-top: 4px;">
-              在下方列表中选择一个可用备用节点并点击 “切换” 按钮开始连接。
+              在下方列表中选择一个可用备用节点并点击 "连接" 按钮开始连接，可同时连接多个节点。
             </div>
           </div>
         </div>
@@ -3244,10 +3269,20 @@ function render(){
     $("rows").innerHTML=currentPageNodes.map(n=>{
       if (!n) return '';
       const isCurrentlyActive = activeNode && n.id === activeNode.id;
-      const rowClass = isCurrentlyActive ? 'class="active-row"' : '';
+      const isMultiConnected = multiProxies.some(mp => mp.node_id === n.id);
+      const isConnected = isCurrentlyActive || isMultiConnected;
+      const multiInstance = multiProxies.find(mp => mp.node_id === n.id);
+      const rowClass = isConnected ? 'class="active-row"' : '';
       
-      const badgeClass = isCurrentlyActive ? 'available' : (n.probe_status || 'not_checked');
-      const badgeText = isCurrentlyActive ? '<span class="badge-pulse"></span>已连接' : translateStatus(n.probe_status);
+      let badgeClass = 'not_checked', badgeText = translateStatus(n.probe_status);
+      if (isCurrentlyActive) {
+        badgeClass = 'available';
+        badgeText = '<span class="badge-pulse"></span>主出口';
+      } else if (isMultiConnected) {
+        badgeClass = 'available';
+        badgeText = '<span class="badge-pulse"></span>端口 ' + multiInstance.proxy_port;
+      }
+      
       const latencyClass = getLatencyClass(n.latency_ms);
       const latencyText = n.latency_ms ? `<span class="latency-val ${latencyClass}">${n.latency_ms} ms</span>` : "-";
       const displayLocation = n.location || translateCountry(n.country) || "-";
@@ -3258,13 +3293,14 @@ function render(){
       const testBtn = `<button class="test-btn" data-node-id="${esc(n.id)}" ${isTesting ? 'disabled' : ''} onclick="testNode(this, '${esc(n.id)}', event)">${testBtnText}</button>`;
       
       const isUnavailable = n.probe_status === "unavailable";
-      const connectBtn = isCurrentlyActive 
-        ? `<button class="connect-btn" disabled style="background: var(--success-gradient); color: white; cursor: default; opacity: 1;">已连接</button>`
-        : `<button class="connect-btn" ${(isUnavailable || state.is_connecting) ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''} onclick="connectNode('${esc(n.id)}')">切换</button>`;
-      
-      const nodeCountry = esc(n.country || n.location || "");
-      const nodeIp = esc(n.ip || n.remote_host || "");
-      const bindBtn = `<button class="btn-secondary" style="height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); cursor: pointer;" onclick="showBindPortModal('${esc(n.id)}', '${nodeCountry}', '${nodeIp}')">绑定端口</button>`;
+      let connectBtn = '';
+      if (isCurrentlyActive) {
+        connectBtn = `<button class="btn-danger" style="height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px;" onclick="disconnectNode()">断开</button>`;
+      } else if (isMultiConnected) {
+        connectBtn = `<button class="btn-danger" style="height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px;" onclick="stopMultiProxyInstance('${multiInstance.id}')">断开</button>`;
+      } else {
+        connectBtn = `<button class="connect-btn" ${isUnavailable ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''} onclick="connectNodeWithPort('${esc(n.id)}')">连接</button>`;
+      }
       
       return `<tr ${rowClass}>
         <td><span class="badge ${badgeClass}">${badgeText}</span></td>
@@ -3279,7 +3315,6 @@ function render(){
           <div class="table-actions">
             ${testBtn}
             ${connectBtn}
-            ${bindBtn}
           </div>
         </td>
       </tr>`;
@@ -3402,6 +3437,36 @@ async function connectNode(id){
     }
     state.is_connecting = false;
     render();
+  }
+}
+
+async function connectNodeWithPort(nodeId) {
+  if (state.is_connecting) {
+    alert("正在连接中，请稍候...");
+    return;
+  }
+  
+  try {
+    const portRes = await fetch("./api/multi_proxy/next_port");
+    const portData = await portRes.json();
+    const proxyPort = portData.port || 7929;
+    
+    const r = await fetch("./api/multi_proxy/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        node_id: nodeId,
+        proxy_port: proxyPort
+      })
+    });
+    const result = await r.json();
+    if (result.ok) {
+      load();
+    } else {
+      alert("连接失败: " + (result.error || "未知错误"));
+    }
+  } catch(e) {
+    alert("连接请求失败: " + e);
   }
 }
 
@@ -4566,7 +4631,20 @@ class Handler(BaseHTTPRequestHandler):
                 if "config_text" in stripped:
                     del stripped["config_text"]
                 stripped_nodes.append(stripped)
-            self.send_json({"nodes": stripped_nodes, "state": get_state()})
+            state = get_state()
+            state["multi_proxies"] = [
+                {
+                    "id": inst_id,
+                    "node_id": inst.get("node_id"),
+                    "proxy_port": inst.get("proxy_port"),
+                    "tun_device": inst.get("tun_device"),
+                    "country": inst.get("country"),
+                    "ip": inst.get("ip"),
+                    "location": inst.get("location")
+                }
+                for inst_id, inst in multi_proxy_instances.items()
+            ]
+            self.send_json({"nodes": stripped_nodes, "state": state})
         elif effective_path.startswith("/configs/"):
             filename = urllib.parse.unquote(effective_path.removeprefix("/configs/"))
             with lock:
