@@ -38,6 +38,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/Guozh1peng/aimili-vpngate/bate
 ### 🛠️ 核心功能一览
 * **一键傻瓜化部署**：全自动配置运行环境，生成随机安全凭证，支持主流 Linux 系统（含轻量化 Alpine）。
 * **极简双效网关**：内置代理服务器在单一端口同时提供 HTTP 和 SOCKS5 代理服务（默认端口 `7928`）。
+* **多出口代理**：支持同时连接多个不同国家的节点，每个节点绑定独立代理端口，实现多地区出口。
 * **精美 Web 管理后台**：现代化暗黑玻璃拟物风格 UI，支持手机、平板、电脑自适应布局。
 * **智能测速与连接**：自动并发测试空闲免费节点，支持 **智能自动配置（失效秒级漂移）**、**固定 IP 节点** 和 **固定国家地区** 三种出站路由模式。
 * **实时系统诊断**：内置网关服务心跳监测、后台守护线程运行状态跟踪。
@@ -75,6 +76,13 @@ bash <(curl -Ls https://raw.githubusercontent.com/Guozh1peng/aimili-vpngate/bate
 ## English
 
 AimiliVPN is a high-performance, zero-dependency VPN proxy gateway built entirely using Python's standard library. It parses official VPNGate servers, benchmarks latency, and routes traffic through a built-in dual-protocol (HTTP/SOCKS5) proxy server.
+
+### Features
+* **One-click deployment**: Auto-configure environment, generate random credentials, supports major Linux distributions.
+* **Multi-exit proxy**: Connect to multiple nodes simultaneously with independent proxy ports for different country exits.
+* **Smart routing**: Auto-benchmark nodes, supports auto-switching, fixed IP, and fixed region modes.
+* **Modern Web UI**: Dark glass-morphism design, responsive for mobile/tablet/desktop.
+* **Real-time diagnostics**: Gateway heartbeat monitoring, daemon thread status tracking.
 
 ### 📢 Community & Feedback
 - **Telegram Group**: [arestemple](https://t.me/arestemple)
