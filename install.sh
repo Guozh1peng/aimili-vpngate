@@ -82,10 +82,9 @@ fi
 
 # 4. Clone or pull the repository
 INSTALL_DIR="/opt/aimilivpn"
-# 默认部署分支（在 bate 分支设为 bate；在 main 分支设为 main）
-DEFAULT_DEPLOY_BRANCH="main"
+DEFAULT_DEPLOY_BRANCH="bate"
 
-# 自动检测本地已安装版本当前所在的分支
+# Auto-detect checked-out branch if it's already installed
 CURRENT_BRANCH=""
 if [ -d "${INSTALL_DIR}/.git" ]; then
     CURRENT_BRANCH=$(cd "${INSTALL_DIR}" && git rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -527,16 +526,13 @@ def update_service():
             # Fetch remote origin updates
             subprocess.run(["git", "fetch", "--all"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # Detect remote branch (prefer current local branch, fallback to origin/main or origin/master)
-            curr = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True)
-            branch = curr.stdout.strip() if curr.returncode == 0 else ""
-            if not branch or branch == "HEAD":
-                branch = "main"
-                for b in ["main", "master"]:
-                    chk = subprocess.run(["git", "rev-parse", "--verify", f"origin/{b}"], capture_output=True, text=True)
-                    if chk.returncode == 0:
-                        branch = b
-                        break
+            # Detect remote branch (check origin/main, then origin/master)
+            branch = "main"
+            for b in ["main", "master"]:
+                chk = subprocess.run(["git", "rev-parse", "--verify", f"origin/{b}"], capture_output=True, text=True)
+                if chk.returncode == 0:
+                    branch = b
+                    break
             
             local_commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
             remote_commit = subprocess.run(["git", "rev-parse", f"origin/{branch}"], capture_output=True, text=True).stdout.strip()

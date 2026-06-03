@@ -86,7 +86,7 @@ OPENVPN_TEST_TIMEOUT_SECONDS = int(os.environ.get("OPENVPN_TEST_TIMEOUT_SECONDS"
 OPENVPN_CMD = os.environ.get("OPENVPN_CMD", "openvpn")
 OPENVPN_AUTH_USER = os.environ.get("OPENVPN_AUTH_USER", "vpn")
 OPENVPN_AUTH_PASS = os.environ.get("OPENVPN_AUTH_PASS", "vpn")
-LOCAL_PROXY_HOST = os.environ.get("LOCAL_PROXY_HOST", "127.0.0.1")
+LOCAL_PROXY_HOST = os.environ.get("LOCAL_PROXY_HOST", "::")
 LOCAL_PROXY_PORT = int(os.environ.get("LOCAL_PROXY_PORT", "7928"))
 UI_HOST = os.environ.get("UI_HOST", "::")
 UI_PORT = int(os.environ.get("UI_PORT", "8787"))
@@ -199,18 +199,6 @@ def load_ui_config() -> dict[str, Any]:
                 
         return config
 
-# 初始化时优先从 ui_auth.json 加载保存的代理出站端口和网页端口配置以覆盖环境变量
-try:
-    _init_cfg = load_ui_config()
-    if "proxy_port" in _init_cfg:
-        LOCAL_PROXY_PORT = int(_init_cfg["proxy_port"])
-    if "port" in _init_cfg:
-        UI_PORT = int(_init_cfg["port"])
-    if "host" in _init_cfg:
-        UI_HOST = _init_cfg["host"]
-except Exception:
-    pass
-
 def get_session_token(password: str, username: str = "admin") -> str:
     salt = "aimilivpn_secure_salt_2026"
     return hashlib.sha256((username + ":" + password + salt).encode("utf-8")).hexdigest()
@@ -279,7 +267,7 @@ def get_state() -> dict[str, Any]:
     state.setdefault("fetch_interval_seconds", FETCH_INTERVAL_SECONDS)
     state.setdefault("check_interval_seconds", CHECK_INTERVAL_SECONDS)
     _proxy_display = f"[{LOCAL_PROXY_HOST}]" if ":" in LOCAL_PROXY_HOST else LOCAL_PROXY_HOST
-    state["local_proxy"] = f"http://{_proxy_display}:{LOCAL_PROXY_PORT}"
+    state.setdefault("local_proxy", f"http://{_proxy_display}:{LOCAL_PROXY_PORT}")
     state.setdefault("last_fetch_status", "not_started")
     state.setdefault("last_check_message", "")
     state.setdefault("blacklisted_nodes", 0)
@@ -289,9 +277,9 @@ def get_state() -> dict[str, Any]:
     state["username"] = ui_cfg.get("username", "admin")
     state["port"] = ui_cfg.get("port", 8787)
     state["secret_path"] = ui_cfg.get("secret_path", "EJsW2EeBo9lY")
-    state["proxy_port"] = ui_cfg.get("proxy_port", 7928)
     state["routing_mode"] = ui_cfg.get("routing_mode", "auto")
     state["force_country"] = ui_cfg.get("force_country", "")
+    state["force_ip_type"] = ui_cfg.get("force_ip_type", "")
     
     return state
 
@@ -1042,6 +1030,7 @@ def auto_switch_node(attempt: int = 0) -> None:
     ui_cfg = load_ui_config()
     routing_mode = ui_cfg.get("routing_mode", "auto")
     target_country = ui_cfg.get("force_country", "")
+    target_ip_type = ui_cfg.get("force_ip_type", "")
 
     if routing_mode == "fixed_ip":
         print("[自动切换] 当前处于固定 IP 模式，不进行自动切换。", flush=True)
@@ -1067,6 +1056,12 @@ def auto_switch_node(attempt: int = 0) -> None:
         
         if routing_mode == "fixed_region" and target_country:
             candidates = [n for n in candidates if n.get("country") == target_country]
+        
+        # IP 类型过滤
+        if target_ip_type and routing_mode != "fixed_ip":
+            ip_type_filtered = [n for n in candidates if n.get("ip_type") == target_ip_type]
+            if ip_type_filtered:
+                candidates = ip_type_filtered
             
         candidates.sort(key=lambda n: (parse_int(n.get("latency_ms")) or 999999, -parse_int(n.get("score"))))
         
@@ -1085,7 +1080,8 @@ def auto_switch_node(attempt: int = 0) -> None:
     else:
         msg = "没有可用的备选节点，将自动断开并清理当前连接状态，同时在后台异步获取新节点..."
         if routing_mode == "fixed_region" and target_country:
-            msg = f"没有可用的【{target_country}】备选节点，已断开连接，将在后台持续尝试获取新节点..."
+            ip_type_hint = f"/{target_ip_type}" if target_ip_type else ""
+            msg = f"没有可用的【{target_country}{ip_type_hint}】备选节点，已断开连接，将在后台持续尝试获取新节点..."
         print(f"[自动切换] {msg}", flush=True)
         log_to_json("WARNING", "VPN", msg)
         stop_active_openvpn()
@@ -1279,6 +1275,7 @@ def maintain_valid_nodes(force: bool = False) -> str:
             ui_cfg = load_ui_config()
             routing_mode = ui_cfg.get("routing_mode", "auto")
             target_country = ui_cfg.get("force_country", "")
+            target_ip_type = ui_cfg.get("force_ip_type", "")
             
             if routing_mode == "fixed_region" and target_country:
                 to_test = [n for n in current_nodes if not n.get("active") and n.get("country") == target_country][:10]
@@ -1299,6 +1296,7 @@ def maintain_valid_nodes(force: bool = False) -> str:
                 ui_cfg = load_ui_config()
                 routing_mode = ui_cfg.get("routing_mode", "auto")
                 target_country = ui_cfg.get("force_country", "")
+                target_ip_type = ui_cfg.get("force_ip_type", "")
                 
                 if routing_mode == "fixed_ip":
                     if active_openvpn_node_id:
@@ -1307,6 +1305,11 @@ def maintain_valid_nodes(force: bool = False) -> str:
                     available_candidates = [n for n in merged if n.get("probe_status") == "available"]
                     if routing_mode == "fixed_region" and target_country:
                         available_candidates = [n for n in available_candidates if n.get("country") == target_country]
+                    # IP 类型过滤（优先匹配，无匹配时不过滤）
+                    if target_ip_type and routing_mode != "fixed_ip":
+                        ip_type_filtered = [n for n in available_candidates if n.get("ip_type") == target_ip_type]
+                        if ip_type_filtered:
+                            available_candidates = ip_type_filtered
                     
                     if available_candidates:
                         auto_switch_node()
@@ -2697,6 +2700,17 @@ INDEX_HTML = r"""<!doctype html>
             </select>
           </div>
           
+          <div id="net_force_ip_type_group" class="form-group" style="margin-bottom: 12px; display: none;">
+            <label class="form-label" for="net_force_ip_type">偏好 IP 类型 (可选)</label>
+            <select id="net_force_ip_type" class="input-field" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; cursor: pointer; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
+              <option value="">不限制 (所有类型)</option>
+              <option value="residential">住宅 IP (Residential)</option>
+              <option value="hosting">机房 IP (Hosting/Datacenter)</option>
+              <option value="mobile">移动网 (Mobile)</option>
+              <option value="proxy">代理 IP (Proxy)</option>
+            </select>
+          </div>
+          
           <div id="net_routing_warning" style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; padding: 8px 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; margin-top: 8px;">
             ℹ️ <strong>自动配置</strong>：全自动测试并选择最佳IP。在使用过程中，如果当前连接节点没有失效，将不再更换IP；如果当前节点失效，系统将立刻秒级自动漂移到其他最快的可用节点。
           </div>
@@ -2743,17 +2757,6 @@ INDEX_HTML = r"""<!doctype html>
       
       <div class="ad-footer" style="margin-top: 20px;">
         官方技术支持及优质资源交流论坛：<a href="https://339936.xyz" target="_blank" class="forum-link">339936.xyz</a>
-      </div>
-
-      <div class="ad-footer" style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 16px; text-align: left; font-size: 13px; color: var(--text-secondary); line-height: 1.6;">
-        <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
-          <svg xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px; color: var(--primary);" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          🎁 捐赠支持项目开发：
-        </div>
-        <div style="font-family: monospace; background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: 6px; margin-top: 6px; word-break: break-all; select-all: true;">
-          <span style="color: var(--primary); font-weight: bold;">BNB (BSC):</span> 0xB6d78c42CEB0687A31B8cfEBE4b51b6eB8953C17<br>
-          <span style="color: var(--primary); font-weight: bold;">TRX (TRC20):</span> TSdzCW6JvsrqcppodYjhSrku4mYmDJ9pxf
-        </div>
       </div>
     </div>
   </div>
@@ -3495,22 +3498,26 @@ document.addEventListener("click", () => {
 
 function handleRoutingModeChange(mode) {
   const countryGroup = $("net_force_country_group");
+  const ipTypeGroup = $("net_force_ip_type_group");
   const warningDiv = $("net_routing_warning");
   
   if (mode === "fixed_region") {
     countryGroup.style.display = "block";
+    ipTypeGroup.style.display = "block";
     warningDiv.style.color = "var(--warning)";
     warningDiv.style.background = "rgba(245, 158, 11, 0.1)";
     warningDiv.style.border = "1px solid rgba(245, 158, 11, 0.2)";
     warningDiv.innerHTML = `⚠️ <strong>固定地区</strong>：限制仅连接选定国家的节点，且后台仅并发测速该国家的节点。如果该国的所有可用节点都失效，会造成代理中断且<strong>绝不自动切换到其他国家</strong>的节点。`;
   } else if (mode === "fixed_ip") {
     countryGroup.style.display = "none";
+    ipTypeGroup.style.display = "none";
     warningDiv.style.color = "var(--warning)";
     warningDiv.style.background = "rgba(245, 158, 11, 0.1)";
     warningDiv.style.border = "1px solid rgba(245, 158, 11, 0.2)";
     warningDiv.innerHTML = `⚠️ <strong>固定IP</strong>：锁定当前连接的节点。不管该节点是否失效，系统都绝不自动切换至其他IP；如果节点由于网络故障失效，会造成代理中断（但如果OpenVPN连接意外退出，脚本将尝试为您在后台重新拉起连接同一IP）。<br><strong>提示</strong>：您可以在主页 of 节点列表中直接点击“连接”按钮来选择并锁定不同的IP节点。`;
   } else {
     countryGroup.style.display = "none";
+    ipTypeGroup.style.display = "block";
     warningDiv.style.color = "var(--text-secondary)";
     warningDiv.style.background = "rgba(255, 255, 255, 0.02)";
     warningDiv.style.border = "1px solid rgba(255, 255, 255, 0.05)";
@@ -3540,6 +3547,9 @@ function populateRoutingCountries() {
     const modeSelect = $("net_routing_mode");
     if (modeSelect) modeSelect.value = mode;
     select.value = state.force_country || "";
+    // 回填 IP 类型选择器的值
+    const ipTypeSelect = $("net_force_ip_type");
+    if (ipTypeSelect) ipTypeSelect.value = state.force_ip_type || "";
     handleRoutingModeChange(mode);
   }
 }
@@ -3643,6 +3653,7 @@ async function saveNetwork(e) {
   const proxyPort = parseInt($("net_proxy_port").value);
   const routingMode = $("net_routing_mode").value;
   const forceCountry = $("net_force_country").value;
+  const forceIpType = $("net_force_ip_type").value;
   
   if (isNaN(port) || port < 1 || port > 65535) {
     errorDivEl.textContent = "网页管理端口范围必须在 1 至 65535 之间";
@@ -3686,7 +3697,8 @@ async function saveNetwork(e) {
         secret_path: suffix,
         proxy_port: proxyPort,
         routing_mode: routingMode,
-        force_country: forceCountry
+        force_country: forceCountry,
+        force_ip_type: forceIpType
       })
     });
     
@@ -4441,6 +4453,12 @@ class Handler(BaseHTTPRequestHandler):
                 new_proxy_port = payload.get("proxy_port")
                 routing_mode = str(payload.get("routing_mode") or "auto").strip()
                 force_country = str(payload.get("force_country") or "").strip()
+                force_ip_type = str(payload.get("force_ip_type") or "").strip()
+                
+                # 校验 IP 类型值
+                if force_ip_type and force_ip_type not in ("residential", "hosting", "mobile", "proxy"):
+                    self.send_json({"ok": False, "error": "无效的 IP 类型筛选值"}, HTTPStatus.BAD_REQUEST)
+                    return
                 
                 try:
                     new_port_int = int(new_port)
@@ -4480,6 +4498,7 @@ class Handler(BaseHTTPRequestHandler):
                 ui_cfg["proxy_port"] = new_proxy_port_int
                 ui_cfg["routing_mode"] = routing_mode
                 ui_cfg["force_country"] = force_country
+                ui_cfg["force_ip_type"] = force_ip_type
                 
                 auth_file = DATA_DIR / "ui_auth.json"
                 with lock:
