@@ -107,6 +107,9 @@ is_connecting = True
 last_active_ping_time = 0.0
 last_active_latency = 0
 
+multi_proxy_instances: dict[str, dict[str, Any]] = {}
+multi_proxy_threads: dict[str, threading.Thread] = {}
+
 last_collector_heartbeat = 0.0
 last_checker_heartbeat = 0.0
 last_pinger_heartbeat = 0.0
@@ -2548,6 +2551,10 @@ INDEX_HTML = r"""<!doctype html>
           <svg xmlns="http://www.w3.org/2000/svg" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
           网关
         </a>
+        <a href="javascript:void(0)" onclick="openMultiProxyModal()">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+          多出口代理
+        </a>
         <a href="javascript:void(0)" onclick="openLogsModal()">
           <svg xmlns="http://www.w3.org/2000/svg" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           日志
@@ -2719,6 +2726,65 @@ INDEX_HTML = r"""<!doctype html>
         <div style="display: flex; gap: 12px; justify-content: flex-end;">
           <button type="button" onclick="closeNetworkModal()" style="height: 40px; padding: 0 16px; font-weight: 600; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); cursor: pointer;">取消</button>
           <button type="submit" id="network_submit_btn" class="btn-primary" style="height: 40px; padding: 0 20px; font-weight: 600; border-radius: 8px;">保存修改</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Multi Proxy Modal (多出口代理管理) -->
+  <div id="multi_proxy_modal" class="modal">
+    <div class="modal-content" style="max-width: 640px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width:20px; height:20px; color: var(--primary);" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+          多出口代理管理
+        </h3>
+        <button type="button" onclick="closeMultiProxyModal()" style="background: transparent; border: none; padding: 4px; cursor: pointer; color: var(--text-secondary); width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+      
+      <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; padding: 12px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">
+        ℹ️ 多出口代理允许您同时连接多个不同国家的节点，每个节点绑定独立的代理端口。您可以在节点列表中点击"绑定端口"来添加新的出口。
+      </div>
+      
+      <div id="multi_proxy_list" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; max-height: 400px; overflow-y: auto;">
+        <div style="text-align: center; color: var(--text-secondary); padding: 20px 0;">
+          暂无多出口代理实例，请在节点列表中点击"绑定端口"添加。
+        </div>
+      </div>
+      
+      <div style="display: flex; justify-content: flex-end;">
+        <button type="button" onclick="closeMultiProxyModal()" style="height: 40px; padding: 0 16px; font-weight: 600; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); cursor: pointer;">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bind Port Modal (绑定端口) -->
+  <div id="bind_port_modal" class="modal">
+    <div class="modal-content" style="max-width: 400px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: var(--text-primary);">绑定代理端口</h3>
+        <button type="button" onclick="closeBindPortModal()" style="background: transparent; border: none; padding: 4px; cursor: pointer; color: var(--text-secondary); width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+      
+      <div id="bind_port_info" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+        <div style="font-size: 13px; color: var(--text-secondary);">节点信息加载中...</div>
+      </div>
+      
+      <form id="bind_port_form" onsubmit="confirmBindPort(event)">
+        <input type="hidden" id="bind_node_id">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="form-label" for="bind_proxy_port">代理端口</label>
+          <input type="number" id="bind_proxy_port" class="input-field" required min="1024" max="65535" placeholder="7929">
+          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">系统会自动分配可用端口</div>
+        </div>
+        
+        <div style="display: flex; gap: 12px; justify-content: flex-end;">
+          <button type="button" onclick="closeBindPortModal()" style="height: 40px; padding: 0 16px; font-weight: 600; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); cursor: pointer;">取消</button>
+          <button type="submit" id="bind_submit_btn" class="btn-primary" style="height: 40px; padding: 0 20px; font-weight: 600; border-radius: 8px;">确认绑定</button>
         </div>
       </form>
     </div>
@@ -3191,11 +3257,12 @@ function render(){
       const testBtnText = isTesting ? `${testSpinner}检测中` : '检测';
       const testBtn = `<button class="test-btn" data-node-id="${esc(n.id)}" ${isTesting ? 'disabled' : ''} onclick="testNode(this, '${esc(n.id)}', event)">${testBtnText}</button>`;
       
-      // Connect button is disabled if probe status is "unavailable" and not already active, or if we are already connecting
       const isUnavailable = n.probe_status === "unavailable";
       const connectBtn = isCurrentlyActive 
         ? `<button class="connect-btn" disabled style="background: var(--success-gradient); color: white; cursor: default; opacity: 1;">已连接</button>`
         : `<button class="connect-btn" ${(isUnavailable || state.is_connecting) ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''} onclick="connectNode('${esc(n.id)}')">切换</button>`;
+      
+      const bindBtn = `<button class="btn-secondary" style="height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); cursor: pointer;" onclick="showBindPortModal('${esc(n.id)}', '${esc(n.country||"")}', '${esc(n.ip||n.remote_host||"")}')">绑定端口</button>`;
       
       return `<tr ${rowClass}>
         <td><span class="badge ${badgeClass}">${badgeText}</span></td>
@@ -3210,6 +3277,7 @@ function render(){
           <div class="table-actions">
             ${testBtn}
             ${connectBtn}
+            ${bindBtn}
           </div>
         </td>
       </tr>`;
@@ -3350,6 +3418,139 @@ async function disconnectNode(){
     }
   } catch (e) {
     alert("请求断开连接失败");
+  }
+}
+
+function openMultiProxyModal() {
+  $("multi_proxy_modal").classList.add("active");
+  loadMultiProxyInstances();
+}
+
+function closeMultiProxyModal() {
+  $("multi_proxy_modal").classList.remove("active");
+}
+
+async function loadMultiProxyInstances() {
+  try {
+    const r = await fetch("./api/multi_proxy/list");
+    const result = await r.json();
+    renderMultiProxyList(result.instances || []);
+  } catch(e) {
+    $("multi_proxy_list").innerHTML = '<div style="text-align: center; color: var(--danger); padding: 20px;">加载失败</div>';
+  }
+}
+
+function renderMultiProxyList(instances) {
+  if (!instances || instances.length === 0) {
+    $("multi_proxy_list").innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">暂无多出口代理实例，请在节点列表中点击"绑定端口"添加。</div>';
+    return;
+  }
+  
+  $("multi_proxy_list").innerHTML = instances.map(inst => {
+    const statusColor = inst.active ? "var(--success)" : "var(--danger)";
+    const statusText = inst.active ? "运行中" : "已停止";
+    return `
+      <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: ${statusColor};"></span>
+            <span style="font-weight: 600; color: var(--text-primary);">${esc(inst.country || inst.location || "未知")}</span>
+          </div>
+          <button onclick="stopMultiProxyInstance('${esc(inst.id)}')" style="height: 28px; padding: 0 12px; font-size: 12px; border-radius: 6px; background: rgba(244,63,94,0.1); border: 1px solid rgba(244,63,94,0.2); color: var(--danger); cursor: pointer;">断开</button>
+        </div>
+        <div style="font-size: 12px; color: var(--text-secondary); display: flex; gap: 16px;">
+          <span>端口: <strong style="color: var(--primary);">${inst.proxy_port}</strong></span>
+          <span>IP: <span class="mono">${esc(inst.ip || "-")}</span></span>
+          <span>TUN: <span class="mono">${esc(inst.tun_device)}</span></span>
+        </div>
+        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+          使用方法: export http_proxy=socks5://127.0.0.1:${inst.proxy_port}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function stopMultiProxyInstance(instanceId) {
+  if (!confirm("确定要断开此多出口代理实例吗？")) return;
+  try {
+    const r = await fetch("./api/multi_proxy/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instance_id: instanceId })
+    });
+    const result = await r.json();
+    if (result.ok) {
+      loadMultiProxyInstances();
+    } else {
+      alert("断开失败: " + (result.error || "未知错误"));
+    }
+  } catch(e) {
+    alert("请求失败");
+  }
+}
+
+let bindPortNodeId = "";
+let bindPortNodeInfo = {};
+
+function showBindPortModal(nodeId, country, ip) {
+  bindPortNodeId = nodeId;
+  bindPortNodeInfo = { country, ip };
+  $("bind_node_id").value = nodeId;
+  $("bind_port_info").innerHTML = `
+    <div style="display: flex; gap: 16px;">
+      <div><span style="color: var(--text-secondary);">国家:</span> <strong style="color: var(--text-primary);">${esc(country || "未知")}</strong></div>
+      <div><span style="color: var(--text-secondary);">IP:</span> <span class="mono">${esc(ip || "-")}</span></div>
+    </div>
+  `;
+  $("bind_proxy_port").value = "";
+  $("bind_port_modal").classList.add("active");
+  
+  fetch("./api/multi_proxy/next_port").then(r => r.json()).then(result => {
+    if (result.port) {
+      $("bind_proxy_port").value = result.port;
+    }
+  }).catch(() => {});
+}
+
+function closeBindPortModal() {
+  $("bind_port_modal").classList.remove("active");
+  bindPortNodeId = "";
+}
+
+async function confirmBindPort(e) {
+  e.preventDefault();
+  const proxyPort = parseInt($("bind_proxy_port").value);
+  if (!proxyPort || proxyPort < 1024 || proxyPort > 65535) {
+    alert("端口必须在 1024-65535 之间");
+    return;
+  }
+  
+  const btn = $("bind_submit_btn");
+  btn.disabled = true;
+  btn.textContent = "绑定中...";
+  
+  try {
+    const r = await fetch("./api/multi_proxy/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        node_id: bindPortNodeId,
+        proxy_port: proxyPort
+      })
+    });
+    const result = await r.json();
+    if (result.ok) {
+      closeBindPortModal();
+      alert("绑定成功！代理端口: " + proxyPort);
+    } else {
+      alert("绑定失败: " + (result.error || "未知错误"));
+    }
+  } catch(e) {
+    alert("请求失败");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "确认绑定";
   }
 }
 
@@ -3950,6 +4151,138 @@ function exportLogContent() {
 }
 </script>
 </body></html>"""
+
+def load_multi_proxy_config() -> list[dict[str, Any]]:
+    config_file = DATA_DIR / "multi_proxy.json"
+    try:
+        if config_file.exists():
+            return json.loads(config_file.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return []
+
+def save_multi_proxy_config(config: list[dict[str, Any]]) -> None:
+    config_file = DATA_DIR / "multi_proxy.json"
+    config_file.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def get_next_tun_index() -> int:
+    used_indexes = {1}
+    for inst in multi_proxy_instances.values():
+        tun_dev = inst.get("tun_device", "")
+        if tun_dev.startswith("tun"):
+            try:
+                idx = int(tun_dev[3:])
+                used_indexes.add(idx)
+            except ValueError:
+                pass
+    for i in range(1, 100):
+        if i not in used_indexes:
+            return i
+    return 99
+
+def get_next_proxy_port() -> int:
+    used_ports = {LOCAL_PROXY_PORT}
+    for inst in multi_proxy_instances.values():
+        used_ports.add(inst.get("proxy_port", 0))
+    for port in range(7929, 8000):
+        if port not in used_ports:
+            return port
+    return 7929
+
+def start_multi_proxy_instance(instance_id: str, node_id: str, proxy_port: int, tun_device: str) -> bool:
+    global multi_proxy_instances, multi_proxy_threads
+    
+    nodes = read_json(NODES_FILE, [])
+    node = next((n for n in nodes if n.get("id") == node_id), None)
+    if not node:
+        return False
+    
+    config_path = CONFIG_DIR / f"multi_{instance_id}.ovpn"
+    try:
+        CONFIG_DIR.mkdir(exist_ok=True, parents=True)
+        config_path.write_text(node.get("config_text") or "", encoding="utf-8")
+    except Exception as e:
+        print(f"[多出口代理] 写入配置文件失败: {e}", flush=True)
+        return False
+    
+    ok, message, process = run_openvpn_until_ready(
+        str(config_path), 
+        keep_alive=True, 
+        route_nopull=True, 
+        dev=tun_device
+    )
+    if not ok or process is None:
+        print(f"[多出口代理] OpenVPN 启动失败: {message}", flush=True)
+        try:
+            config_path.unlink()
+        except Exception:
+            pass
+        return False
+    
+    def run_proxy():
+        proxy_server.start_proxy_server(LOCAL_PROXY_HOST, proxy_port, tun_device=tun_device)
+    
+    proxy_thread = threading.Thread(target=run_proxy, daemon=True)
+    proxy_thread.start()
+    
+    multi_proxy_instances[instance_id] = {
+        "node_id": node_id,
+        "proxy_port": proxy_port,
+        "tun_device": tun_device,
+        "config_file": str(config_path),
+        "process": process,
+        "country": node.get("country", ""),
+        "ip": node.get("ip") or node.get("remote_host", ""),
+        "location": node.get("location") or node.get("country", ""),
+    }
+    multi_proxy_threads[instance_id] = proxy_thread
+    
+    print(f"[多出口代理] 已启动实例 {instance_id}: 端口 {proxy_port}, TUN {tun_device}", flush=True)
+    log_to_json("INFO", "MultiProxy", f"已启动多出口代理实例: {instance_id} (端口 {proxy_port}, 节点 {node_id})")
+    return True
+
+def stop_multi_proxy_instance(instance_id: str) -> bool:
+    global multi_proxy_instances, multi_proxy_threads
+    
+    inst = multi_proxy_instances.get(instance_id)
+    if not inst:
+        return False
+    
+    process = inst.get("process")
+    if process:
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
+    
+    config_file = inst.get("config_file")
+    if config_file:
+        try:
+            Path(config_file).unlink()
+        except Exception:
+            pass
+    
+    del multi_proxy_instances[instance_id]
+    if instance_id in multi_proxy_threads:
+        del multi_proxy_threads[instance_id]
+    
+    print(f"[多出口代理] 已停止实例 {instance_id}", flush=True)
+    log_to_json("INFO", "MultiProxy", f"已停止多出口代理实例: {instance_id}")
+    return True
+
+def restore_multi_proxy_instances() -> None:
+    config = load_multi_proxy_config()
+    for inst in config:
+        instance_id = inst.get("id")
+        node_id = inst.get("node_id")
+        proxy_port = inst.get("proxy_port")
+        tun_device = inst.get("tun_device")
+        if instance_id and node_id and proxy_port and tun_device:
+            start_multi_proxy_instance(instance_id, node_id, proxy_port, tun_device)
 
 def check_proxy_health() -> dict[str, Any]:
     # 1. 检测代理服务端口是否在监听
@@ -4621,6 +4954,87 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(result)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        
+        elif effective_path == "/api/multi_proxy/list":
+            try:
+                instances = []
+                for inst_id, inst in multi_proxy_instances.items():
+                    instances.append({
+                        "id": inst_id,
+                        "node_id": inst.get("node_id"),
+                        "proxy_port": inst.get("proxy_port"),
+                        "tun_device": inst.get("tun_device"),
+                        "country": inst.get("country"),
+                        "ip": inst.get("ip"),
+                        "location": inst.get("location"),
+                        "active": True
+                    })
+                self.send_json({"ok": True, "instances": instances})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        
+        elif effective_path == "/api/multi_proxy/next_port":
+            try:
+                port = get_next_proxy_port()
+                self.send_json({"ok": True, "port": port})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        
+        elif effective_path == "/api/multi_proxy/start":
+            try:
+                length = parse_int(self.headers.get("Content-Length"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                node_id = str(payload.get("node_id") or "")
+                proxy_port = parse_int(payload.get("proxy_port"))
+                
+                if not node_id:
+                    self.send_json({"ok": False, "error": "缺少节点 ID"}, HTTPStatus.BAD_REQUEST)
+                    return
+                
+                if not proxy_port or proxy_port < 1024 or proxy_port > 65535:
+                    proxy_port = get_next_proxy_port()
+                
+                tun_index = get_next_tun_index()
+                tun_device = f"tun{tun_index}"
+                instance_id = f"mp_{node_id[:8]}_{proxy_port}"
+                
+                ok = start_multi_proxy_instance(instance_id, node_id, proxy_port, tun_device)
+                if ok:
+                    config = load_multi_proxy_config()
+                    config.append({
+                        "id": instance_id,
+                        "node_id": node_id,
+                        "proxy_port": proxy_port,
+                        "tun_device": tun_device
+                    })
+                    save_multi_proxy_config(config)
+                    self.send_json({"ok": True, "instance_id": instance_id, "proxy_port": proxy_port})
+                else:
+                    self.send_json({"ok": False, "error": "启动多出口代理实例失败"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        
+        elif effective_path == "/api/multi_proxy/stop":
+            try:
+                length = parse_int(self.headers.get("Content-Length"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                instance_id = str(payload.get("instance_id") or "")
+                
+                if not instance_id:
+                    self.send_json({"ok": False, "error": "缺少实例 ID"}, HTTPStatus.BAD_REQUEST)
+                    return
+                
+                ok = stop_multi_proxy_instance(instance_id)
+                if ok:
+                    config = load_multi_proxy_config()
+                    config = [c for c in config if c.get("id") != instance_id]
+                    save_multi_proxy_config(config)
+                    self.send_json({"ok": True})
+                else:
+                    self.send_json({"ok": False, "error": "停止实例失败或实例不存在"}, HTTPStatus.BAD_REQUEST)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        
         else:
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -4710,6 +5124,8 @@ def main() -> None:
     threading.Thread(target=collector_loop, daemon=True).start()
     threading.Thread(target=background_proxy_checker, daemon=True).start()
     threading.Thread(target=active_node_pinger, daemon=True).start()
+    
+    threading.Thread(target=restore_multi_proxy_instances, daemon=True).start()
     
     ui_cfg = load_ui_config()
     ui_host = ui_cfg.get("host", UI_HOST)

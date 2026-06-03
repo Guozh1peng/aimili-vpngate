@@ -22,7 +22,16 @@ def recv_exact(sock: socket.socket, size: int) -> bytes:
         data += chunk
     return data
 
-def resolve_dns_over_tun0(host: str, dns_server: str = "8.8.8.8", timeout: float = 3.0) -> str | None:
+TUN_DEVICE = "tun0"
+
+def set_tun_device(device: str) -> None:
+    global TUN_DEVICE
+    TUN_DEVICE = device
+
+def get_tun_device() -> str:
+    return TUN_DEVICE
+
+def resolve_dns_over_tun0(host: str, dns_server: str = "8.8.8.8", timeout: float = 3.0, tun_device: str = None) -> str | None:
     try:
         socket.inet_aton(host)
         return host
@@ -54,8 +63,9 @@ def resolve_dns_over_tun0(host: str, dns_server: str = "8.8.8.8", timeout: float
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.settimeout(timeout)
+        tun = tun_device or TUN_DEVICE
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, b"tun0")
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, tun.encode())
         except OSError as e:
             if "operation not permitted" in str(e).lower() or e.errno == 1:
                 print("[DNS 绑定失败] [错误代码 3006] DNS 解析绑定 tun0 权限不足，请确保程序以 root 权限运行！", flush=True)
@@ -122,9 +132,10 @@ def resolve_dns_over_tun0(host: str, dns_server: str = "8.8.8.8", timeout: float
         offset += rdlength
     return None
 
-def create_connection(address: tuple[str, int], timeout: float = 20) -> socket.socket:
+def create_connection(address: tuple[str, int], timeout: float = 20, tun_device: str = None) -> socket.socket:
     host, port = address
-    resolved_ip = resolve_dns_over_tun0(host)
+    tun = tun_device or TUN_DEVICE
+    resolved_ip = resolve_dns_over_tun0(host, tun_device=tun)
     if resolved_ip:
         host = resolved_ip
 
@@ -135,7 +146,7 @@ def create_connection(address: tuple[str, int], timeout: float = 20) -> socket.s
         try:
             sock = socket.socket(af, socktype, proto)
             sock.settimeout(timeout)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, b"tun0")
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, tun.encode())
             sock.connect(sa)
             return sock
         except OSError as e:
@@ -164,7 +175,7 @@ def relay(left: socket.socket, right: socket.socket) -> None:
                 return
             target.sendall(data)
 
-def socks5_client(client: socket.socket, first_byte: bytes) -> None:
+def socks5_client(client: socket.socket, first_byte: bytes, tun_device: str = None) -> None:
     upstream = None
     try:
         methods_count = recv_exact(client, 1)[0]
@@ -185,7 +196,7 @@ def socks5_client(client: socket.socket, first_byte: bytes) -> None:
             return
         port = int.from_bytes(recv_exact(client, 2), "big")
         try:
-            upstream = create_connection((host, port), timeout=20)
+            upstream = create_connection((host, port), timeout=20, tun_device=tun_device)
         except Exception as e:
             print(f"[SOCKS5 代理失败] 目标 {host}:{port} 连接失败: {e}", flush=True)
             try:
@@ -209,7 +220,7 @@ def read_http_header(client: socket.socket, first_byte: bytes) -> bytes:
         data += chunk
     return data
 
-def http_client(client: socket.socket, first_byte: bytes) -> None:
+def http_client(client: socket.socket, first_byte: bytes, tun_device: str = None) -> None:
     upstream = None
     try:
         header = read_http_header(client, first_byte)
@@ -219,7 +230,7 @@ def http_client(client: socket.socket, first_byte: bytes) -> None:
         if method.upper() == "CONNECT":
             host, _, port_text = target.partition(":")
             port = parse_int(port_text) or 443
-            upstream = create_connection((host, port), timeout=20)
+            upstream = create_connection((host, port), timeout=20, tun_device=tun_device)
             client.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             if rest:
                 upstream.sendall(rest)
@@ -234,7 +245,7 @@ def http_client(client: socket.socket, first_byte: bytes) -> None:
         path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
         headers = [line for line in lines[1:] if not line.lower().startswith(("proxy-connection:", "connection:"))]
         request = f"{method} {path} {version}\r\n" + "\r\n".join(headers) + "\r\nConnection: close\r\n\r\n"
-        upstream = create_connection((parsed.hostname, port), timeout=20)
+        upstream = create_connection((parsed.hostname, port), timeout=20, tun_device=tun_device)
         upstream.sendall(request.encode("iso-8859-1") + rest)
         relay(client, upstream)
     except Exception as e:
@@ -248,14 +259,14 @@ def http_client(client: socket.socket, first_byte: bytes) -> None:
         if upstream:
             upstream.close()
 
-def proxy_client(client: socket.socket, address: tuple[str, int]) -> None:
+def proxy_client(client: socket.socket, address: tuple[str, int], tun_device: str = None) -> None:
     try:
         client.settimeout(30)
         first = recv_exact(client, 1)
         if first == b"\x05":
-            socks5_client(client, first)
+            socks5_client(client, first, tun_device=tun_device)
         else:
-            http_client(client, first)
+            http_client(client, first, tun_device=tun_device)
     except Exception as e:
         err_msg = str(e)
         if "[错误代码" in err_msg:
@@ -265,7 +276,8 @@ def proxy_client(client: socket.socket, address: tuple[str, int]) -> None:
         except OSError:
             pass
 
-def start_proxy_server(host: str, port: int) -> None:
+def start_proxy_server(host: str, port: int, tun_device: str = None) -> None:
+    tun = tun_device or TUN_DEVICE
     is_ipv6 = ":" in host or host == ""
     af = socket.AF_INET6 if is_ipv6 else socket.AF_INET
     try:
@@ -318,7 +330,7 @@ def start_proxy_server(host: str, port: int) -> None:
     while True:
         try:
             client, address = server.accept()
-            threading.Thread(target=proxy_client, args=(client, address), daemon=True).start()
+            threading.Thread(target=proxy_client, args=(client, address, tun), daemon=True).start()
         except Exception as e:
             print(f"[ERROR] Proxy accept failed: {e}", flush=True)
             time.sleep(0.5)
