@@ -23,12 +23,12 @@ AimiliVPN 是一款基于官方 VPNGate 开放协议的高性能、零依赖 VPN
 
 #### 🌟 正式稳定版本 (main 分支)
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/baoweise-bot/aimili-vpngate/main/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/Guozh1peng/aimili-vpngate/main/install.sh)
 ```
 
 #### 🧪 测试开发版本 (bate 分支)
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/baoweise-bot/aimili-vpngate/bate/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/Guozh1peng/aimili-vpngate/bate/install.sh)
 ```
 
 > 💡 **小贴士**：部署完成后，终端会输出管理网页的专属链接（含安全后缀）。在终端中输入 `ml` 命令可以随时调出交互式管理菜单。
@@ -90,12 +90,12 @@ Run the corresponding command on your Linux VPS as root:
 
 #### 🌟 Stable Release (main branch)
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/baoweise-bot/aimili-vpngate/main/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/Guozh1peng/aimili-vpngate/main/install.sh)
 ```
 
 #### 🧪 Beta / Development (bate branch)
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/baoweise-bot/aimili-vpngate/bate/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/Guozh1peng/aimili-vpngate/bate/install.sh)
 ```
 
 > 💡 **Quick Note**: Once installed, copy the printed URL from the terminal to access the Web UI. Type the `ml` command in the terminal to summon the interactive CLI management console.
