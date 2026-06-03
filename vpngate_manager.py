@@ -3262,7 +3262,9 @@ function render(){
         ? `<button class="connect-btn" disabled style="background: var(--success-gradient); color: white; cursor: default; opacity: 1;">已连接</button>`
         : `<button class="connect-btn" ${(isUnavailable || state.is_connecting) ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''} onclick="connectNode('${esc(n.id)}')">切换</button>`;
       
-      const bindBtn = `<button class="btn-secondary" style="height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); cursor: pointer;" onclick="showBindPortModal('${esc(n.id)}', '${esc(n.country||"")}', '${esc(n.ip||n.remote_host||"")}')">绑定端口</button>`;
+      const nodeCountry = esc(n.country || n.location || "");
+      const nodeIp = esc(n.ip || n.remote_host || "");
+      const bindBtn = `<button class="btn-secondary" style="height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-secondary); cursor: pointer;" onclick="showBindPortModal('${esc(n.id)}', '${nodeCountry}', '${nodeIp}')">绑定端口</button>`;
       
       return `<tr ${rowClass}>
         <td><span class="badge ${badgeClass}">${badgeText}</span></td>
@@ -3423,12 +3425,12 @@ async function disconnectNode(){
 
 function openMultiProxyModal() {
   $("admin_dropdown").style.display = "none";
-  $("multi_proxy_modal").classList.add("active");
+  $("multi_proxy_modal").style.display = "flex";
   loadMultiProxyInstances();
 }
 
 function closeMultiProxyModal() {
-  $("multi_proxy_modal").classList.remove("active");
+  $("multi_proxy_modal").style.display = "none";
 }
 
 async function loadMultiProxyInstances() {
@@ -3505,7 +3507,7 @@ function showBindPortModal(nodeId, country, ip) {
     </div>
   `;
   $("bind_proxy_port").value = "";
-  $("bind_port_modal").classList.add("active");
+  $("bind_port_modal").style.display = "flex";
   
   fetch("./api/multi_proxy/next_port").then(r => r.json()).then(result => {
     if (result.port) {
@@ -3515,7 +3517,7 @@ function showBindPortModal(nodeId, country, ip) {
 }
 
 function closeBindPortModal() {
-  $("bind_port_modal").classList.remove("active");
+  $("bind_port_modal").style.display = "none";
   bindPortNodeId = "";
 }
 
