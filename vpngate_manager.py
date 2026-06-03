@@ -5069,14 +5069,12 @@ class Handler(BaseHTTPRequestHandler):
                 length = parse_int(self.headers.get("Content-Length"))
                 payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
                 node_id = str(payload.get("node_id") or "")
-                proxy_port = parse_int(payload.get("proxy_port"))
                 
                 if not node_id:
                     self.send_json({"ok": False, "error": "缺少节点 ID"}, HTTPStatus.BAD_REQUEST)
                     return
                 
-                if not proxy_port or proxy_port < 1024 or proxy_port > 65535:
-                    proxy_port = get_next_proxy_port()
+                proxy_port = get_next_proxy_port()
                 
                 tun_index = get_next_tun_index()
                 tun_device = f"tun{tun_index}"
