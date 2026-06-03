@@ -474,6 +474,27 @@ def print_status():
     print_line("【使用方法】")
     print_line(f"  export http_proxy=socks5://{socks_addr}:{proxy_port}")
     print_line(f"  export https_proxy=socks5://{socks_addr}:{proxy_port}")
+    
+    multi_proxy_file = "/opt/aimilivpn/vpngate_data/multi_proxy.json"
+    multi_proxies = []
+    if os.path.exists(multi_proxy_file):
+        try:
+            with open(multi_proxy_file, "r", encoding="utf-8") as f:
+                multi_proxies = json.load(f)
+        except Exception:
+            pass
+    
+    if multi_proxies:
+        print_line()
+        print_line("【多出口代理实例】")
+        for inst in multi_proxies:
+            mp_port = inst.get("proxy_port", "-")
+            mp_country = inst.get("country", inst.get("node_id", "未知")[:8])
+            mp_tun = inst.get("tun_device", "-")
+            port_ok = check_port_listening(mp_port)
+            mp_status = f"{green}[运行中]{reset}" if port_ok else f"{red}[已停止]{reset}"
+            print_line(format_line(f"端口 {mp_port} ({mp_country})", mp_status))
+    
     print_line("=======================================================")
 
 def run_service_cmd(cmd):
