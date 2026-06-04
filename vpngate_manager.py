@@ -1062,11 +1062,9 @@ def auto_switch_node(attempt: int = 0) -> None:
         if (routing_mode == "fixed_region" or routing_mode == "multi_node") and target_country:
             candidates = [n for n in candidates if n.get("country") == target_country]
         
-        # IP 类型过滤
+        # IP 类型过滤 (严格锁定模式)
         if target_ip_type and routing_mode != "fixed_ip":
-            ip_type_filtered = [n for n in candidates if n.get("ip_type") == target_ip_type]
-            if ip_type_filtered:
-                candidates = ip_type_filtered
+            candidates = [n for n in candidates if n.get("ip_type") == target_ip_type]
             
         candidates.sort(key=lambda n: (parse_int(n.get("latency_ms")) or 999999, -parse_int(n.get("score"))))
         
@@ -1310,11 +1308,9 @@ def maintain_valid_nodes(force: bool = False) -> str:
                     available_candidates = [n for n in merged if n.get("probe_status") == "available"]
                     if (routing_mode == "fixed_region" or routing_mode == "multi_node") and target_country:
                         available_candidates = [n for n in available_candidates if n.get("country") == target_country]
-                    # IP 类型过滤（优先匹配，无匹配时不过滤）
+                    # IP 类型过滤 (严格锁定模式)
                     if target_ip_type and routing_mode != "fixed_ip":
-                        ip_type_filtered = [n for n in available_candidates if n.get("ip_type") == target_ip_type]
-                        if ip_type_filtered:
-                            available_candidates = ip_type_filtered
+                        available_candidates = [n for n in available_candidates if n.get("ip_type") == target_ip_type]
                     
                     if available_candidates:
                         auto_switch_node()
@@ -4242,14 +4238,14 @@ def get_next_proxy_port() -> int:
             return port
     return 7929
 
-def start_multi_proxy_instance(instance_id: str, node_id: str, proxy_port: int, tun_device: str) -> bool:
+def start_multi_proxy_instance(instance_id: str, node_id: str, proxy_port: int, tun_device: str, managed_config: dict[str, Any] = None) -> bool:
     global multi_proxy_instances, multi_proxy_threads
-    
+
     nodes = read_json(NODES_FILE, [])
     node = next((n for n in nodes if n.get("id") == node_id), None)
     if not node:
         return False
-    
+
     config_path = CONFIG_DIR / f"multi_{instance_id}.ovpn"
     try:
         CONFIG_DIR.mkdir(exist_ok=True, parents=True)
@@ -4257,11 +4253,11 @@ def start_multi_proxy_instance(instance_id: str, node_id: str, proxy_port: int, 
     except Exception as e:
         print(f"[多出口代理] 写入配置文件失败: {e}", flush=True)
         return False
-    
+
     ok, message, process = run_openvpn_until_ready(
-        str(config_path), 
-        keep_alive=True, 
-        route_nopull=True, 
+        str(config_path),
+        keep_alive=True,
+        route_nopull=True,
         dev=tun_device
     )
     if not ok or process is None:
@@ -4271,13 +4267,13 @@ def start_multi_proxy_instance(instance_id: str, node_id: str, proxy_port: int, 
         except Exception:
             pass
         return False
-    
+
     def run_proxy():
         proxy_server.start_proxy_server(LOCAL_PROXY_HOST, proxy_port, tun_device=tun_device)
-    
+
     proxy_thread = threading.Thread(target=run_proxy, daemon=True)
     proxy_thread.start()
-    
+
     multi_proxy_instances[instance_id] = {
         "node_id": node_id,
         "proxy_port": proxy_port,
@@ -4287,9 +4283,10 @@ def start_multi_proxy_instance(instance_id: str, node_id: str, proxy_port: int, 
         "country": node.get("country", ""),
         "ip": node.get("ip") or node.get("remote_host", ""),
         "location": node.get("location") or node.get("country", ""),
+        "ip_type": node.get("ip_type", ""),
+        "managed_config": managed_config
     }
     multi_proxy_threads[instance_id] = proxy_thread
-    
     print(f"[多出口代理] 已启动实例 {instance_id}: 端口 {proxy_port}, TUN {tun_device}", flush=True)
     log_to_json("INFO", "MultiProxy", f"已启动多出口代理实例: {instance_id} (端口 {proxy_port}, 节点 {node_id})")
     return True
@@ -4334,8 +4331,9 @@ def restore_multi_proxy_instances() -> None:
         node_id = inst.get("node_id")
         proxy_port = inst.get("proxy_port")
         tun_device = inst.get("tun_device")
+        managed_config = inst.get("managed_config")
         if instance_id and node_id and proxy_port and tun_device:
-            start_multi_proxy_instance(instance_id, node_id, proxy_port, tun_device)
+            start_multi_proxy_instance(instance_id, node_id, proxy_port, tun_device, managed_config=managed_config)
 
 def check_proxy_health() -> dict[str, Any]:
     # 1. 检测代理服务端口是否在监听
@@ -4572,13 +4570,24 @@ def multi_node_manager_loop() -> None:
                     inst = multi_proxy_instances.get(inst_id)
                     if not inst: continue
                     
-                    # 检查是否符合当前锁定的国家条件
-                    is_compliant = True
-                    if target_country and inst.get("country") != target_country:
-                        is_compliant = False
+                    # 获取该实例的锁定条件：优先使用实例自身的托管配置，否则使用全局配置
+                    managed_cfg = inst.get("managed_config", {})
+                    if managed_cfg:
+                        current_target_country = managed_cfg.get("target_country")
+                        current_target_ip_type = managed_cfg.get("target_ip_type")
+                    else:
+                        current_target_country = target_country
+                        current_target_ip_type = target_ip_type
+
+                    # 检查是否符合锁定的国家条件
+                    if current_target_country and inst.get("country") != current_target_country:
+                        print(f"[多节点管理器] 实例 {inst_id} 不符合国家锁定条件 ({current_target_country})，正在移除...", flush=True)
+                        stop_multi_proxy_instance(inst_id)
+                        continue
                     
-                    if not is_compliant:
-                        print(f"[多节点管理器] 实例 {inst_id} 不符合当前锁定的国家 ({target_country})，正在移除...", flush=True)
+                    # 检查是否符合锁定的 IP 类型条件
+                    if current_target_ip_type and inst.get("ip_type") != current_target_ip_type:
+                        print(f"[多节点管理器] 实例 {inst_id} 不符合 IP 类型锁定条件 ({current_target_ip_type})，正在移除...", flush=True)
                         stop_multi_proxy_instance(inst_id)
                         continue
 
@@ -4593,8 +4602,8 @@ def multi_node_manager_loop() -> None:
                 active_count = len(multi_proxy_instances)
                 if active_count < target_count:
                     nodes = read_json(NODES_FILE, [])
-                    # 排除已在使用的节点
-                    used_node_ids = {inst.get("node_id") for inst in multi_proxy_instances.values()}
+                    # 排除已在使用的节点 (主出口 + 所有多出口实例)
+                    used_node_ids = {inst.get("node_id") for inst in multi_proxy_instances.values() if inst.get("node_id")}
                     if active_openvpn_node_id:
                         used_node_ids.add(active_openvpn_node_id)
                         
@@ -4609,9 +4618,7 @@ def multi_node_manager_loop() -> None:
                         candidates = [n for n in candidates if n.get("country") == target_country]
                     
                     if target_ip_type:
-                        ip_type_filtered = [n for n in candidates if n.get("ip_type") == target_ip_type]
-                        if ip_type_filtered:
-                            candidates = ip_type_filtered
+                        candidates = [n for n in candidates if n.get("ip_type") == target_ip_type]
                     
                     # 按照延迟和分数排序
                     candidates.sort(key=lambda n: (parse_int(n.get("latency_ms")) or 999999, -parse_int(n.get("score"))))
@@ -4627,6 +4634,19 @@ def multi_node_manager_loop() -> None:
                         
                         print(f"[多节点管理器] 正在自动连接新节点: {node['id']} (国家: {node.get('country')}, 端口: {proxy_port})", flush=True)
                         start_multi_proxy_instance(instance_id, node['id'], proxy_port, tun_device)
+                
+                # 3. 处理手动创建但开启了“托管模式”的实例 (由 API 触发)
+                for inst_id, inst in multi_proxy_instances.items():
+                    managed_cfg = inst.get("managed_config")
+                    if not managed_cfg: continue
+                    
+                    m_country = managed_cfg.get("target_country")
+                    m_ip_type = managed_cfg.get("target_ip_type")
+                    
+                    # 如果该托管实例当前不符合要求，或连通性失败，在上面第一步已经处理了
+                    # 这里不需要额外处理，第一步会自动清理不符合条件的实例，然后第二步会根据全局或未来可能的局部规则补齐
+                    pass
+
             
             else:
                 # 如果不是多节点模式，则自动关闭带有 mp_auto_ 前缀的实例
@@ -5180,8 +5200,11 @@ class Handler(BaseHTTPRequestHandler):
                         "country": inst.get("country"),
                         "ip": inst.get("ip"),
                         "location": inst.get("location"),
+                        "ip_type": inst.get("ip_type"),
+                        "managed_config": inst.get("managed_config"),
                         "active": True
-                    })
+                        })
+
                 self.send_json({"ok": True, "instances": instances})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -5220,7 +5243,9 @@ class Handler(BaseHTTPRequestHandler):
                         "tun_device": tun_device,
                         "country": inst.get("country", ""),
                         "ip": inst.get("ip", ""),
-                        "location": inst.get("location", "")
+                        "location": inst.get("location", ""),
+                        "ip_type": inst.get("ip_type", ""),
+                        "managed_config": inst.get("managed_config")
                     })
                     save_multi_proxy_config(config)
                     self.send_json({"ok": True, "instance_id": instance_id, "proxy_port": proxy_port})
