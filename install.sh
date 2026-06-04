@@ -379,11 +379,11 @@ def format_line(label, value, target_width=26):
 def print_line(text=""):
     print(f"{text}\033[K")
 
-def print_status():
     cfg = load_ui_cfg()
     ui_port = cfg.get("port", 8787)
     secret_path = cfg.get("secret_path", "EJsW2EeBo9lY")
     proxy_port = cfg.get("proxy_port", 7928)
+    routing_mode = cfg.get("routing_mode", "auto")
     state = load_state()
     is_connecting = state.get("is_connecting", False)
     
@@ -400,8 +400,17 @@ def print_status():
     reset = "\033[0m"
     bold = "\033[1m"
     yellow = "\033[1;33m"
+    blue = "\033[1;34m"
     
     backend_status = f"{green}[已激活] (PID: {pid}){reset}" if (service_ok and pid) else f"{red}[未启动]{reset}"
+    
+    routing_names = {
+        "auto": "智能自动配置",
+        "fixed_ip": "固定 IP 模式",
+        "fixed_region": "固定地区模式",
+        "multi_node": "多节点并发模式"
+    }
+    mode_display = routing_names.get(routing_mode, routing_mode)
     
     if is_connecting:
         gateway_status = f"{yellow}[切换中...]{reset}"
@@ -411,9 +420,10 @@ def print_status():
         openvpn_status = f"{green}[已连接]{reset}" if openvpn_ok else f"{red}[未连接]{reset}"
     
     print_line("=======================================================")
-    print_line(f"               {bold}AimiliVPN 管理终端 v2.0{reset}                  ")
+    print_line(f"               {bold}AimiliVPN 管理终端 v2.1 (Beta){reset}                  ")
     print_line("=======================================================")
     print_line("【核心服务状态】")
+    print_line(format_line("出站路由模式", f"{blue}{mode_display}{reset}"))
     print_line(format_line(f"代理网关 (Port {proxy_port})", gateway_status))
     print_line(format_line(f"管理后台 (Port {ui_port})", backend_status))
     print_line(format_line("连接核心 (OpenVPN)", openvpn_status))
@@ -555,9 +565,9 @@ def update_service():
             # Fetch remote origin updates
             subprocess.run(["git", "fetch", "--all"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # Detect remote branch (check origin/main, then origin/master)
-            branch = "main"
-            for b in ["main", "master"]:
+            # Detect remote branch (check current branch, then origin/main, then origin/master)
+            branch = "bate"
+            for b in [DEPLOY_BRANCH, "bate", "main", "master"]:
                 chk = subprocess.run(["git", "rev-parse", "--verify", f"origin/{b}"], capture_output=True, text=True)
                 if chk.returncode == 0:
                     branch = b
