@@ -113,6 +113,7 @@ multi_proxy_threads: dict[str, threading.Thread] = {}
 last_collector_heartbeat = 0.0
 last_checker_heartbeat = 0.0
 last_pinger_heartbeat = 0.0
+last_multi_node_manager_heartbeat = 0.0
 server_start_time = time.time()
 
 def ensure_dirs() -> None:
@@ -283,6 +284,7 @@ def get_state() -> dict[str, Any]:
     state["routing_mode"] = ui_cfg.get("routing_mode", "auto")
     state["force_country"] = ui_cfg.get("force_country", "")
     state["force_ip_type"] = ui_cfg.get("force_ip_type", "")
+    state["multi_node_count"] = ui_cfg.get("multi_node_count", 3)
     
     return state
 
@@ -1057,7 +1059,7 @@ def auto_switch_node(attempt: int = 0) -> None:
             and not n.get("active")
         ]
         
-        if routing_mode == "fixed_region" and target_country:
+        if (routing_mode == "fixed_region" or routing_mode == "multi_node") and target_country:
             candidates = [n for n in candidates if n.get("country") == target_country]
         
         # IP 类型过滤
@@ -1082,7 +1084,7 @@ def auto_switch_node(attempt: int = 0) -> None:
             auto_switch_node(attempt + 1)
     else:
         msg = "没有可用的备选节点，将自动断开并清理当前连接状态，同时在后台异步获取新节点..."
-        if routing_mode == "fixed_region" and target_country:
+        if (routing_mode == "fixed_region" or routing_mode == "multi_node") and target_country:
             ip_type_hint = f"/{target_ip_type}" if target_ip_type else ""
             msg = f"没有可用的【{target_country}{ip_type_hint}】备选节点，已断开连接，将在后台持续尝试获取新节点..."
         print(f"[自动切换] {msg}", flush=True)
@@ -1280,7 +1282,7 @@ def maintain_valid_nodes(force: bool = False) -> str:
             target_country = ui_cfg.get("force_country", "")
             target_ip_type = ui_cfg.get("force_ip_type", "")
             
-            if routing_mode == "fixed_region" and target_country:
+            if (routing_mode == "fixed_region" or routing_mode == "multi_node") and target_country:
                 to_test = [n for n in current_nodes if not n.get("active") and n.get("country") == target_country][:10]
             else:
                 to_test = [n for n in current_nodes if not n.get("active")][:10]
@@ -1306,7 +1308,7 @@ def maintain_valid_nodes(force: bool = False) -> str:
                         auto_switch_node()
                 else:
                     available_candidates = [n for n in merged if n.get("probe_status") == "available"]
-                    if routing_mode == "fixed_region" and target_country:
+                    if (routing_mode == "fixed_region" or routing_mode == "multi_node") and target_country:
                         available_candidates = [n for n in available_candidates if n.get("country") == target_country]
                     # IP 类型过滤（优先匹配，无匹配时不过滤）
                     if target_ip_type and routing_mode != "fixed_ip":
@@ -2738,6 +2740,7 @@ INDEX_HTML = r"""<!doctype html>
               <option value="auto">自动配置 (智能切换，最稳定)</option>
               <option value="fixed_ip">固定 IP (永不自动换 IP)</option>
               <option value="fixed_region">固定地区 (锁定特定国家节点)</option>
+              <option value="multi_node">多节点模式 (自动并发维护多个连接)</option>
             </select>
           </div>
           
@@ -2746,6 +2749,11 @@ INDEX_HTML = r"""<!doctype html>
             <select id="net_force_country" class="input-field" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; cursor: pointer; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
               <option value="">正在加载节点国家...</option>
             </select>
+          </div>
+
+          <div id="net_multi_node_count_group" class="form-group" style="margin-bottom: 12px; display: none;">
+            <label class="form-label" for="net_multi_node_count">多节点并发数量 (1-8)</label>
+            <input type="number" id="net_multi_node_count" class="input-field" min="1" max="8" value="3" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
           </div>
           
           <div id="net_force_ip_type_group" class="form-group" style="margin-bottom: 12px; display: none;">
@@ -3620,11 +3628,21 @@ document.addEventListener("click", () => {
 function handleRoutingModeChange(mode) {
   const countryGroup = $("net_force_country_group");
   const ipTypeGroup = $("net_force_ip_type_group");
+  const multiNodeGroup = $("net_multi_node_count_group");
   const warningDiv = $("net_routing_warning");
-  
-  if (mode === "fixed_region") {
+
+  if (mode === "multi_node") {
     countryGroup.style.display = "block";
     ipTypeGroup.style.display = "block";
+    multiNodeGroup.style.display = "block";
+    warningDiv.style.color = "var(--primary)";
+    warningDiv.style.background = "rgba(99, 102, 241, 0.1)";
+    warningDiv.style.border = "1px solid rgba(99, 102, 241, 0.2)";
+    warningDiv.innerHTML = `🚀 <strong>多节点模式</strong>：系统将根据您的“锁定国家”和“偏好IP类型”设置，自动在后台并发维护指定数量的多个连接。这非常适合需要多IP出口或高可用性的场景。`;
+  } else if (mode === "fixed_region") {
+    countryGroup.style.display = "block";
+    ipTypeGroup.style.display = "block";
+    multiNodeGroup.style.display = "none";
     warningDiv.style.color = "var(--warning)";
     warningDiv.style.background = "rgba(245, 158, 11, 0.1)";
     warningDiv.style.border = "1px solid rgba(245, 158, 11, 0.2)";
@@ -3632,6 +3650,7 @@ function handleRoutingModeChange(mode) {
   } else if (mode === "fixed_ip") {
     countryGroup.style.display = "none";
     ipTypeGroup.style.display = "none";
+    multiNodeGroup.style.display = "none";
     warningDiv.style.color = "var(--warning)";
     warningDiv.style.background = "rgba(245, 158, 11, 0.1)";
     warningDiv.style.border = "1px solid rgba(245, 158, 11, 0.2)";
@@ -3639,6 +3658,7 @@ function handleRoutingModeChange(mode) {
   } else {
     countryGroup.style.display = "none";
     ipTypeGroup.style.display = "block";
+    multiNodeGroup.style.display = "none";
     warningDiv.style.color = "var(--text-secondary)";
     warningDiv.style.background = "rgba(255, 255, 255, 0.02)";
     warningDiv.style.border = "1px solid rgba(255, 255, 255, 0.05)";
@@ -3749,9 +3769,11 @@ function openNetworkModal() {
     $("net_port").value = state.port || 8787;
     $("net_suffix").value = state.secret_path || "";
     $("net_proxy_port").value = state.proxy_port || 7928;
+    $("net_multi_node_count").value = state.multi_node_count || 3;
   }
   
   populateRoutingCountries();
+  handleRoutingModeChange($("net_routing_mode").value);
   $("network_modal").style.display = "flex";
   $("admin_dropdown").style.display = "none";
 }
@@ -3775,6 +3797,7 @@ async function saveNetwork(e) {
   const routingMode = $("net_routing_mode").value;
   const forceCountry = $("net_force_country").value;
   const forceIpType = $("net_force_ip_type").value;
+  const multiNodeCount = parseInt($("net_multi_node_count").value) || 3;
   
   if (isNaN(port) || port < 1 || port > 65535) {
     errorDivEl.textContent = "网页管理端口范围必须在 1 至 65535 之间";
@@ -3805,6 +3828,12 @@ async function saveNetwork(e) {
     errorDivEl.style.display = "block";
     return;
   }
+
+  if (routingMode === "multi_node" && !forceCountry) {
+    errorDivEl.textContent = "多节点模式下请选择一个要锁定的目标国家";
+    errorDivEl.style.display = "block";
+    return;
+  }
   
   submitBtn.disabled = true;
   submitBtn.textContent = "正在保存...";
@@ -3819,7 +3848,8 @@ async function saveNetwork(e) {
         proxy_port: proxyPort,
         routing_mode: routingMode,
         force_country: forceCountry,
-        force_ip_type: forceIpType
+        force_ip_type: forceIpType,
+        multi_node_count: multiNodeCount
       })
     });
     
@@ -4517,6 +4547,100 @@ def active_node_pinger() -> None:
             print(f"[ERROR] active_node_pinger error: {e}", flush=True)
         time.sleep(10)
 
+def multi_node_manager_loop() -> None:
+    """
+    后台循环：当处于 'multi_node' (多节点模式) 时，自动维护指定数量的并发连接。
+    """
+    global last_multi_node_manager_heartbeat
+    last_multi_node_manager_heartbeat = time.time()
+    time.sleep(10) # 启动后稍微等待，让基础服务先跑起来
+    
+    while True:
+        last_multi_node_manager_heartbeat = time.time()
+        try:
+            ui_cfg = load_ui_config()
+            routing_mode = ui_cfg.get("routing_mode", "auto")
+            
+            if routing_mode == "multi_node":
+                target_count = parse_int(ui_cfg.get("multi_node_count", 3))
+                target_country = ui_cfg.get("force_country", "")
+                target_ip_type = ui_cfg.get("force_ip_type", "")
+                
+                # 1. 检测并清理失效或不符合条件的实例
+                current_instances = list(multi_proxy_instances.keys())
+                for inst_id in current_instances:
+                    inst = multi_proxy_instances.get(inst_id)
+                    if not inst: continue
+                    
+                    # 检查是否符合当前锁定的国家条件
+                    is_compliant = True
+                    if target_country and inst.get("country") != target_country:
+                        is_compliant = False
+                    
+                    if not is_compliant:
+                        print(f"[多节点管理器] 实例 {inst_id} 不符合当前锁定的国家 ({target_country})，正在移除...", flush=True)
+                        stop_multi_proxy_instance(inst_id)
+                        continue
+
+                    # 检测连通性
+                    port = inst.get("proxy_port")
+                    health = check_proxy_health_by_port(port)
+                    if not health["ok"]:
+                        print(f"[多节点管理器] 实例 {inst_id} (端口 {port}) 连通性检测失败: {health.get('error')}，正在更换...", flush=True)
+                        stop_multi_proxy_instance(inst_id)
+                
+                # 2. 补齐不足的实例
+                active_count = len(multi_proxy_instances)
+                if active_count < target_count:
+                    nodes = read_json(NODES_FILE, [])
+                    # 排除已在使用的节点
+                    used_node_ids = {inst.get("node_id") for inst in multi_proxy_instances.values()}
+                    if active_openvpn_node_id:
+                        used_node_ids.add(active_openvpn_node_id)
+                        
+                    candidates = [
+                        n for n in nodes 
+                        if n.get("probe_status") == "available" 
+                        and not n.get("active")
+                        and n.get("id") not in used_node_ids
+                    ]
+                    
+                    if target_country:
+                        candidates = [n for n in candidates if n.get("country") == target_country]
+                    
+                    if target_ip_type:
+                        ip_type_filtered = [n for n in candidates if n.get("ip_type") == target_ip_type]
+                        if ip_type_filtered:
+                            candidates = ip_type_filtered
+                    
+                    # 按照延迟和分数排序
+                    candidates.sort(key=lambda n: (parse_int(n.get("latency_ms")) or 999999, -parse_int(n.get("score"))))
+                    
+                    needed = target_count - active_count
+                    for i in range(min(needed, len(candidates))):
+                        node = candidates[i]
+                        proxy_port = get_next_proxy_port()
+                        tun_index = get_next_tun_index()
+                        tun_device = f"tun{tun_index}"
+                        # 自动管理的实例使用 mp_auto_ 前缀
+                        instance_id = f"mp_auto_{node['id'][:8]}_{proxy_port}"
+                        
+                        print(f"[多节点管理器] 正在自动连接新节点: {node['id']} (国家: {node.get('country')}, 端口: {proxy_port})", flush=True)
+                        start_multi_proxy_instance(instance_id, node['id'], proxy_port, tun_device)
+            
+            else:
+                # 如果不是多节点模式，则自动关闭带有 mp_auto_ 前缀的实例
+                auto_instances = [inst_id for inst_id in multi_proxy_instances.keys() if inst_id.startswith("mp_auto_")]
+                for inst_id in auto_instances:
+                    print(f"[多节点管理器] 模式已切换，正在停止自动维护的实例 {inst_id}...", flush=True)
+                    stop_multi_proxy_instance(inst_id)
+                    
+        except Exception as e:
+            print(f"[多节点管理器] 循环异常: {e}", flush=True)
+            
+        time.sleep(30)
+
+
 
 class Handler(BaseHTTPRequestHandler):
     def get_secret_path(self) -> str:
@@ -4732,6 +4856,13 @@ class Handler(BaseHTTPRequestHandler):
                 "details": f"上次心跳: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_pinger_heartbeat)) if last_pinger_heartbeat > 0 else '等待启动'}",
                 "error": "" if pinger_ok else "线程可能已中止，无法实时刷新活动节点的 Ping 延迟。"
             }
+            manager_ok = (last_multi_node_manager_heartbeat > 0.0 and now - last_multi_node_manager_heartbeat < 60.0) or (server_uptime < 30.0)
+            manager_status = {
+                "name": "多节点维护线程",
+                "status": "running" if manager_ok else "stopped",
+                "details": f"上次心跳: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_multi_node_manager_heartbeat)) if last_multi_node_manager_heartbeat > 0 else '等待启动'}",
+                "error": "" if manager_ok else "线程可能已挂起，导致自动维护的多节点连接无法及时更新。"
+            }
             self.send_json({
                 "ok": True,
                 "services": [
@@ -4740,7 +4871,8 @@ class Handler(BaseHTTPRequestHandler):
                     openvpn_status,
                     collector_status,
                     checker_status,
-                    pinger_status
+                    pinger_status,
+                    manager_status
                 ]
             })
         elif effective_path == "/api/logs":
@@ -4862,6 +4994,7 @@ class Handler(BaseHTTPRequestHandler):
                 routing_mode = str(payload.get("routing_mode") or "auto").strip()
                 force_country = str(payload.get("force_country") or "").strip()
                 force_ip_type = str(payload.get("force_ip_type") or "").strip()
+                multi_node_count = parse_int(payload.get("multi_node_count") or 3)
                 
                 # 校验 IP 类型值
                 if force_ip_type and force_ip_type not in ("residential", "hosting", "mobile", "proxy"):
@@ -4892,8 +5025,12 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": False, "error": "安全后缀仅能由英文字母和数字组成"}, HTTPStatus.BAD_REQUEST)
                     return
                 
-                if routing_mode not in ("auto", "fixed_ip", "fixed_region"):
+                if routing_mode not in ("auto", "fixed_ip", "fixed_region", "multi_node"):
                     self.send_json({"ok": False, "error": "无效的路由配置模式"}, HTTPStatus.BAD_REQUEST)
+                    return
+
+                if multi_node_count < 1 or multi_node_count > 8:
+                    self.send_json({"ok": False, "error": "并发节点数量需在 1 至 8 之间"}, HTTPStatus.BAD_REQUEST)
                     return
                 
                 ui_cfg = load_ui_config()
@@ -4907,6 +5044,7 @@ class Handler(BaseHTTPRequestHandler):
                 ui_cfg["routing_mode"] = routing_mode
                 ui_cfg["force_country"] = force_country
                 ui_cfg["force_ip_type"] = force_ip_type
+                ui_cfg["multi_node_count"] = multi_node_count
                 
                 auth_file = DATA_DIR / "ui_auth.json"
                 with lock:
@@ -5216,6 +5354,7 @@ def main() -> None:
     threading.Thread(target=collector_loop, daemon=True).start()
     threading.Thread(target=background_proxy_checker, daemon=True).start()
     threading.Thread(target=active_node_pinger, daemon=True).start()
+    threading.Thread(target=multi_node_manager_loop, daemon=True).start()
     
     threading.Thread(target=restore_multi_proxy_instances, daemon=True).start()
     
