@@ -3638,11 +3638,14 @@ $("refresh").onclick=async()=>{
     $("refresh").textContent="更新节点";
   }, 3000);
 };
-$("btn_test_proxy").onclick = async () => {
-  const btn = $("btn_test_proxy");
+const legacyProxyTestBtn = $("btn_test_proxy");
+if (legacyProxyTestBtn) {
+legacyProxyTestBtn.onclick = async () => {
+  const btn = legacyProxyTestBtn;
   const badge = $("proxy_status_badge");
   const ipVal = $("proxy_ip_val");
   const latVal = $("proxy_latency_val");
+  if (!badge || !ipVal || !latVal) return;
   
   btn.disabled = true;
   btn.innerHTML = `<span class="badge-pulse"></span>测试中...`;
@@ -3677,6 +3680,7 @@ $("btn_test_proxy").onclick = async () => {
     btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> 测试代理`;
   }
 };
+}
 
 // Admin dropdown toggle & GitHub dropdown toggle
 const adminBtn = $("admin_btn");
