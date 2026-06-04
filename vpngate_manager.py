@@ -286,6 +286,23 @@ def get_state() -> dict[str, Any]:
     state["force_ip_type"] = ui_cfg.get("force_ip_type", "")
     state["multi_node_count"] = ui_cfg.get("multi_node_count", 3)
     
+    # 包含多出口代理实例信息
+    m_instances = []
+    with lock:
+        for inst_id, inst in multi_proxy_instances.items():
+            m_instances.append({
+                "id": inst_id,
+                "node_id": inst.get("node_id"),
+                "proxy_port": inst.get("proxy_port"),
+                "tun_device": inst.get("tun_device"),
+                "country": inst.get("country"),
+                "ip": inst.get("ip"),
+                "location": inst.get("location"),
+                "ip_type": inst.get("ip_type"),
+                "managed_config": inst.get("managed_config")
+            })
+    state["multi_proxies"] = m_instances
+    
     return state
 
 def safe_name(value: str) -> str:
@@ -3163,7 +3180,9 @@ function render(){
       const latencyText = node.latency_ms ? `<span class="latency-val ${latencyClass}">${node.latency_ms} ms</span>` : "-";
       const displayLocation = node.location || translateCountry(node.country) || "-";
       const mainBadge = node.isMain ? '<span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border-color: rgba(99, 102, 241, 0.3); margin-left: 8px;">主出口</span>' : '';
-      
+      const isManaged = !node.isMain && node.managed_config && (node.managed_config.target_country || node.managed_config.target_ip_type);
+      const lockedText = isManaged ? ' <span style="color: var(--primary); font-size: 11px;">(已锁定)</span>' : '';
+
       return `
         <div class="active-card" style="${idx > 0 ? 'margin-top: 12px;' : ''}">
           <div class="active-card-info">
@@ -3173,7 +3192,7 @@ function render(){
             <div class="active-card-details">
               <div class="active-card-title">
                 <span class="badge available"><span class="badge-pulse"></span>已连接</span>
-                <strong>${esc(translateCountry(node.country))} 节点</strong>${mainBadge}
+                <strong>${esc(translateCountry(node.country))} 节点</strong>${mainBadge}${lockedText}
               </div>
               <div class="active-card-value mono" style="font-size: 20px; margin-top: 2px;">
                 ${esc(node.ip || node.remote_host)}:${node.remote_port || ""}
@@ -3186,10 +3205,15 @@ function render(){
               </div>
             </div>
           </div>
-          <button class="btn-danger" style="height: 38px; padding: 0 16px; border-radius: 8px;" onclick="${node.isMain ? 'disconnectNode()' : `stopMultiProxyInstance('${node.instanceId}')`}">
-            <svg xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            断开连接
-          </button>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button class="test-btn" style="height: 38px; width: 38px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px;" title="锁定设置" onclick="${node.isMain ? 'openNetworkModal()' : `openInstanceModal('${node.instanceId}', ${node.proxyPort})`}">
+              <svg xmlns="http://www.w3.org/2000/svg" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            </button>
+            <button class="btn-danger" style="height: 38px; padding: 0 16px; border-radius: 8px; display: flex; align-items: center; gap: 6px;" onclick="${node.isMain ? 'disconnectNode()' : `stopMultiProxyInstance('${node.instanceId}')`}">
+              <svg xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              断开连接
+            </button>
+          </div>
         </div>
       `;
     }).join("");
