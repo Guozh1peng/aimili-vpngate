@@ -3782,8 +3782,12 @@ function populateRoutingCountries() {
 }
 
 function openInstanceModal(instanceId, port) {
-  const inst = multiProxies.find(m => m.id === instanceId);
-  if (!inst) return;
+  const m_proxies = state.multi_proxies || [];
+  const inst = m_proxies.find(m => m.id === instanceId);
+  if (!inst) {
+    console.error("找不到实例:", instanceId, "当前列表:", m_proxies);
+    return;
+  }
 
   $("inst_id").value = instanceId;
   $("inst_display_port").textContent = port;
@@ -3796,7 +3800,6 @@ function openInstanceModal(instanceId, port) {
 
   $("instance_modal").style.display = "flex";
 }
-
 function closeInstanceModal() {
   $("instance_modal").style.display = "none";
 }
