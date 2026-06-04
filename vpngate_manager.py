@@ -2618,19 +2618,10 @@ INDEX_HTML = r"""<!doctype html>
       </section>
     </div>
 
-    <!-- 代理出口状态检测卡片 -->
-    <div class="stat" style="margin-bottom: 24px; border-radius: 12px; padding: 20px; background: var(--bg-surface); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-color);">
-      <div class="stat-info" style="gap: 6px;">
-        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-          <span id="proxy_status_badge" class="badge not_checked">未检测</span>
-          <strong id="proxy_ip_val" style="font-size: 20px; background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">-</strong>
-        </div>
-        <span style="font-size: 13px; color: var(--text-secondary);">代理出口状态 <span id="proxy_latency_val"></span></span>
-      </div>
-      <button id="btn_test_proxy" class="test-btn" style="height: 36px; padding: 0 14px; white-space: nowrap;">
-        <svg xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> 测试代理
-      </button>
-    </div>
+    <!-- 代理出口状态检测区域 (动态支持多出口) -->
+    <section id="proxy_exits_container" style="margin-bottom: 24px; display: flex; flex-direction: column; gap: 12px;">
+      <!-- 动态渲染每个活动端口的出口状态 -->
+    </section>
 
   <section class="toolbar">
     <select id="country_filter">
@@ -3248,52 +3239,67 @@ function render(){
   const localProxy = state.local_proxy || `http://127.0.0.1:${state.proxy_port || 7928}`;
   if ($("status")) { $("status").innerHTML=`<span class="status-dot"></span>HTTP 代理本地接口：${localProxy} | 活动节点：${activeNodeInfo} | 状态：${statusMessage}`; }
   
-  // Update proxy test status card based on background checks
-  const pBadge = $("proxy_status_badge");
-  const pIpVal = $("proxy_ip_val");
-  const pLatVal = $("proxy_latency_val");
-  const pBtn = $("btn_test_proxy");
-  
-  if (state.is_connecting) {
-    pBadge.className = "badge";
-    pBadge.style.background = "rgba(245, 158, 11, 0.15)";
-    pBadge.style.color = "#f59e0b";
-    pBadge.style.borderColor = "rgba(245, 158, 11, 0.3)";
-    pBadge.innerHTML = `<span class="badge-pulse" style="background: #f59e0b;"></span>正在连接`;
-    pIpVal.textContent = state.active_node_latency || "正在连接...";
-    pLatVal.innerHTML = `<span style="color: var(--text-secondary); font-size: 12px;">${esc(state.last_check_message || "正在与 VPN 节点建立加密隧道，请稍候...")}</span>`;
-    pBtn.disabled = true;
-    pBtn.style.opacity = "0.5";
-    pBtn.style.cursor = "not-allowed";
-  } else {
-    pBtn.disabled = false;
-    pBtn.style.opacity = "";
-    pBtn.style.cursor = "";
-    pBadge.style.background = "";
-    pBadge.style.color = "";
-    pBadge.style.borderColor = "";
-    if (state.proxy_ok !== undefined) {
-      if (state.proxy_ok) {
-        pBadge.className = "badge available";
-        pBadge.textContent = "可用";
-        pIpVal.textContent = state.proxy_ip || "-";
-        const latencyClass = getLatencyClass(state.proxy_latency_ms);
-        pLatVal.innerHTML = `<span class="latency-val ${latencyClass}" style="margin-left:8px;">${state.proxy_latency_ms} ms</span>`;
-      } else {
-        pBadge.className = "badge unavailable";
-        pBadge.textContent = "不可用";
-        pIpVal.textContent = "-";
-        pLatVal.innerHTML = `<span class="latency-val latency-poor" style="margin-left:8px; font-size:11px; max-width: 450px; display: inline-block; white-space: normal; line-height: 1.4; text-align: left;" title="${esc(state.proxy_error)}">${esc(state.proxy_error || "连接失败")}</span>`;
-      }
+  // 更新多出口检测面板
+  const exitsContainer = $("proxy_exits_container");
+  if (exitsContainer) {
+    if (connectedNodes.length === 0) {
+      exitsContainer.innerHTML = `
+        <div class="stat" style="border-radius: 12px; padding: 20px; background: var(--bg-surface); border: 1px solid var(--border-color); justify-content: center;">
+          <span style="color: var(--text-secondary); font-size: 14px;">当前无活动连接，请先连接 VPN 节点</span>
+        </div>
+      `;
     } else {
-      pBadge.className = "badge not_checked";
-      pBadge.textContent = "未检测";
-      pIpVal.textContent = "-";
-      if (state.last_check_message) {
-        pLatVal.innerHTML = `<span style="color: var(--text-secondary); font-size: 12px;">${esc(state.last_check_message)}</span>`;
-      } else {
-        pLatVal.innerHTML = "";
-      }
+      exitsContainer.innerHTML = connectedNodes.map(node => {
+        const port = node.proxyPort;
+        const isMain = node.isMain;
+        
+        // 如果是主出口且正在连接中，显示特殊状态
+        const isCurrentlyConnecting = isMain && state.is_connecting;
+        
+        // 获取该端口的缓存测试结果 (如果是主出口，可能在 state 根级)
+        let proxyOk = false, proxyIp = "-", proxyLatency = 0, proxyError = "";
+        
+        if (isMain) {
+            proxyOk = state.proxy_ok;
+            proxyIp = state.proxy_ip || "-";
+            proxyLatency = state.proxy_latency_ms || 0;
+            proxyError = state.proxy_error || "";
+        } else {
+            // 查找多出口实例的实时测试数据 (如果有的话，目前后端主要推主出口，我们先做 UI 兼容)
+            proxyIp = node.exit_ip || "-";
+            proxyLatency = node.exit_latency || 0;
+            proxyOk = !!node.exit_ip;
+        }
+
+        let badgeHtml = '<span class="badge not_checked">未检测</span>';
+        if (isCurrentlyConnecting) {
+          badgeHtml = '<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border-color: rgba(245, 158, 11, 0.3);"><span class="badge-pulse" style="background: #f59e0b;"></span>正在连接</span>';
+        } else if (proxyOk) {
+          badgeHtml = '<span class="badge available">出口正常</span>';
+        } else if (proxyError || proxyIp === "检测失败") {
+          badgeHtml = `<span class="badge unavailable" title="${esc(proxyError)}">出口受阻</span>`;
+        }
+
+        const latText = proxyLatency ? `<span class="latency-val ${getLatencyClass(proxyLatency)}" style="margin-left:8px;">${proxyLatency} ms</span>` : "";
+        const displayIp = isCurrentlyConnecting ? (state.active_node_latency || "正在拨号...") : proxyIp;
+        const subText = isCurrentlyConnecting ? (state.last_check_message || "正在建立隧道...") : `代理端口: ${port} ${latText}`;
+
+        return `
+          <div class="stat" style="border-radius: 12px; padding: 16px 20px; background: var(--bg-surface); border: 1px solid var(--border-color); animation: fadeIn 0.3s ease-out;">
+            <div class="stat-info" style="gap: 4px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                ${badgeHtml}
+                <strong style="font-size: 18px; color: var(--text-primary); font-family: 'JetBrains Mono';">${esc(displayIp)}</strong>
+              </div>
+              <span style="font-size: 12px; color: var(--text-secondary);">${subText}</span>
+            </div>
+            <button class="test-btn" onclick="testProxyPort(${port}, this)" style="height: 34px; padding: 0 12px; white-space: nowrap; ${isCurrentlyConnecting ? 'opacity:0.5; cursor:not-allowed;' : ''}" ${isCurrentlyConnecting ? 'disabled' : ''}>
+              <svg xmlns="http://www.w3.org/2000/svg" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              测试出口
+            </button>
+          </div>
+        `;
+      }).join("");
     }
   }
 
@@ -4030,6 +4036,66 @@ async function saveNetwork(e) {
     errorDivEl.style.display = "block";
     submitBtn.disabled = false;
     submitBtn.textContent = "保存修改";
+  }
+}
+
+async function testProxyPort(port, btn) {
+  if (btn) btn.disabled = true;
+  
+  // 查找该端口对应的展示条目 (在 proxy_exits_container 中)
+  const exitsContainer = $("proxy_exits_container");
+  if (!exitsContainer) return;
+  
+  const items = exitsContainer.querySelectorAll(".stat");
+  let targetItem = null;
+  for (let item of items) {
+     if (item.innerText.includes("代理端口: " + port)) {
+         targetItem = item;
+         break;
+     }
+  }
+
+  if (targetItem) {
+    const badge = targetItem.querySelector(".badge");
+    const ipStrong = targetItem.querySelector("strong");
+    if (badge) {
+        badge.className = "badge";
+        badge.style.background = "rgba(99, 102, 241, 0.15)";
+        badge.style.color = "var(--primary)";
+        badge.style.borderColor = "rgba(99, 102, 241, 0.3)";
+        badge.innerHTML = `<span class="badge-pulse"></span>正在检测`;
+    }
+    if (ipStrong) ipStrong.textContent = "检测中...";
+  }
+
+  try {
+    const res = await fetch("./api/test_proxy_port", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ port })
+    });
+    const data = await res.json();
+    
+    // 如果是主端口，同步更新全局 state
+    if (port === (state.proxy_port || 7928)) {
+        state.proxy_ok = data.ok;
+        state.proxy_ip = data.ip || "-";
+        state.proxy_latency_ms = data.latency_ms || 0;
+        state.proxy_error = data.error || "";
+    } else {
+        // 更新多出口列表中的局部数据
+        const inst = state.multi_proxies.find(m => m.proxy_port === port);
+        if (inst) {
+            inst.exit_ip = data.ip || (data.ok ? data.ip : "检测失败");
+            inst.exit_latency = data.latency_ms || 0;
+        }
+    }
+    render();
+  } catch (e) {
+    console.error("检测请求失败", e);
+    render();
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
