@@ -2776,6 +2776,55 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
 
+  <!-- Instance Modal (特定实例锁定设置) -->
+  <div id="instance_modal" class="modal">
+    <div class="modal-content" style="max-width: 400px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width:20px; height:20px; color: var(--primary);" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+          实例锁定设置
+        </h3>
+        <button type="button" onclick="closeInstanceModal()" style="background: transparent; border: none; padding: 4px; cursor: pointer; color: var(--text-secondary); width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+
+      <div id="inst_info" style="margin-bottom: 20px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid var(--border-color);">
+        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px;">当前监听端口</div>
+        <div id="inst_display_port" style="font-size: 18px; font-weight: 700; color: var(--primary); font-family: 'JetBrains Mono';">7929</div>
+      </div>
+      
+      <form id="instance_form" onsubmit="saveInstanceSettings(event)">
+        <input type="hidden" id="inst_id">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="form-label" for="inst_force_country">锁定国家地区</label>
+          <select id="inst_force_country" class="input-field" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; cursor: pointer; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
+            <option value="">不锁定 (跟随全局/自动)</option>
+          </select>
+        </div>
+        
+        <div class="form-group" style="margin-bottom: 20px;">
+          <label class="form-label" for="inst_force_ip_type">锁定 IP 类型</label>
+          <select id="inst_force_ip_type" class="input-field" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; cursor: pointer; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
+            <option value="">跟随全局</option>
+            <option value="residential">严格锁定: 住宅 IP</option>
+            <option value="hosting">严格锁定: 机房 IP</option>
+            <option value="mobile">严格锁定: 移动网</option>
+          </select>
+        </div>
+
+        <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; padding: 10px; background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.1); border-radius: 6px; margin-bottom: 20px;">
+          ℹ️ <strong>独立托管模式</strong>：设置后，后台管理器将以此端口的规则为准进行自动维护。即使全局模式不是“多节点模式”，此端口也会被自动保持在线。
+        </div>
+        
+        <div style="display: flex; gap: 12px; justify-content: flex-end;">
+          <button type="button" onclick="closeInstanceModal()" style="height: 40px; padding: 0 16px; font-weight: 600; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); cursor: pointer;">取消</button>
+          <button type="submit" id="inst_submit_btn" class="btn-primary" style="height: 40px; padding: 0 20px; font-weight: 600; border-radius: 8px;">应用规则</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Ad Modal (VPS 购买推荐) -->
   <div id="ad_modal" class="modal">
     <div class="modal-content" style="max-width: 640px;">
@@ -3251,7 +3300,8 @@ function render(){
         badgeText = '<span class="badge-pulse"></span>主出口';
       } else if (isMultiConnected) {
         badgeClass = 'available';
-        badgeText = '<span class="badge-pulse"></span>端口 ' + multiInstance.proxy_port;
+        const isManaged = multiInstance.managed_config && (multiInstance.managed_config.target_country || multiInstance.managed_config.target_ip_type);
+        badgeText = '<span class="badge-pulse"></span>端口 ' + multiInstance.proxy_port + (isManaged ? ' (锁定)' : '');
       }
       
       const latencyClass = getLatencyClass(n.latency_ms);
@@ -3265,10 +3315,15 @@ function render(){
       
       const isUnavailable = n.probe_status === "unavailable";
       let connectBtn = '';
+      let settingBtn = '';
+      
       if (isCurrentlyActive) {
         connectBtn = `<button class="btn-danger" style="height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px;" onclick="disconnectNode()">断开</button>`;
       } else if (isMultiConnected) {
         connectBtn = `<button class="btn-danger" style="height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px;" onclick="stopMultiProxyInstance('${multiInstance.id}')">断开</button>`;
+        settingBtn = `<button class="test-btn" style="padding: 0 8px; height: 28px;" title="锁定设置" onclick="openInstanceModal('${multiInstance.id}', ${multiInstance.proxy_port})">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+        </button>`;
       } else {
         connectBtn = `<button class="connect-btn" ${isUnavailable ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''} onclick="connectNodeWithPort('${esc(n.id)}')">连接</button>`;
       }
@@ -3285,6 +3340,7 @@ function render(){
         <td>
           <div class="table-actions">
             ${testBtn}
+            ${settingBtn}
             ${connectBtn}
           </div>
         </td>
@@ -3663,34 +3719,99 @@ function handleRoutingModeChange(mode) {
 }
 
 function populateRoutingCountries() {
-  const select = $("net_force_country");
-  if (!select) return;
+  const selectors = ["net_force_country", "inst_force_country"];
   const countMap = {};
   nodes.forEach(n => {
     if (n.country) {
       countMap[n.country] = (countMap[n.country] || 0) + 1;
     }
   });
-  
   const countries = Object.keys(countMap).sort();
-  let html = '<option value="">请选择要锁定的国家...</option>';
+  let optionsHtml = '<option value="">不锁定 (自动选择最佳)</option>';
+  if (selectors[0] === "net_force_country") optionsHtml = '<option value="">请选择要锁定的国家...</option>';
+
   countries.forEach(c => {
-    html += `<option value="${esc(c)}">${esc(c)} (${countMap[c]}个节点)</option>`;
+    optionsHtml += `<option value="${esc(c)}">${esc(c)} (${countMap[c]}个节点)</option>`;
   });
-  select.innerHTML = html;
-  
+
+  selectors.forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    const currentVal = el.value;
+    if (id === "inst_force_country") {
+       el.innerHTML = '<option value="">不锁定 (跟随全局/自动)</option>' + countries.map(c => `<option value="${esc(c)}">${esc(c)} (${countMap[c]}个节点)</option>`).join("");
+    } else {
+       el.innerHTML = optionsHtml;
+    }
+    el.value = currentVal;
+  });
+
   if (state) {
     const mode = state.routing_mode || "auto";
     const modeSelect = $("net_routing_mode");
     if (modeSelect) modeSelect.value = mode;
-    select.value = state.force_country || "";
-    // 回填 IP 类型选择器的值
+    $("net_force_country").value = state.force_country || "";
     const ipTypeSelect = $("net_force_ip_type");
     if (ipTypeSelect) ipTypeSelect.value = state.force_ip_type || "";
     handleRoutingModeChange(mode);
   }
 }
 
+function openInstanceModal(instanceId, port) {
+  const inst = multiProxies.find(m => m.id === instanceId);
+  if (!inst) return;
+
+  $("inst_id").value = instanceId;
+  $("inst_display_port").textContent = port;
+
+  populateRoutingCountries();
+
+  const mCfg = inst.managed_config || {};
+  $("inst_force_country").value = mCfg.target_country || "";
+  $("inst_force_ip_type").value = mCfg.target_ip_type || "";
+
+  $("instance_modal").style.display = "flex";
+}
+
+function closeInstanceModal() {
+  $("instance_modal").style.display = "none";
+}
+
+async function saveInstanceSettings(e) {
+  e.preventDefault();
+  const instanceId = $("inst_id").value;
+  const country = $("inst_force_country").value;
+  const ipType = $("inst_force_ip_type").value;
+  const btn = $("inst_submit_btn");
+
+  btn.disabled = true;
+  btn.textContent = "正在应用...";
+
+  try {
+    const res = await fetch("./api/multi_proxy/update_managed_config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instance_id: instanceId,
+        target_country: country,
+        target_ip_type: ipType
+      })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      closeInstanceModal();
+      load(); // 重新加载状态以反映变化
+    } else {
+      alert("保存失败: " + (data.error || "未知错误"));
+    }
+  } catch (err) {
+    alert("请求失败，请检查网络");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "应用规则";
+  }
+}
 function openCredentialsModal() {
   $("credentials_error").style.display = "none";
   $("credentials_success").style.display = "none";
@@ -4558,69 +4679,89 @@ def multi_node_manager_loop() -> None:
         try:
             ui_cfg = load_ui_config()
             routing_mode = ui_cfg.get("routing_mode", "auto")
+            target_country = ui_cfg.get("force_country", "")
+            target_ip_type = ui_cfg.get("force_ip_type", "")
             
-            if routing_mode == "multi_node":
-                target_count = parse_int(ui_cfg.get("multi_node_count", 3))
-                target_country = ui_cfg.get("force_country", "")
-                target_ip_type = ui_cfg.get("force_ip_type", "")
+            # --- 第一阶段：健康检查与规则校验 (所有实例) ---
+            current_instances = list(multi_proxy_instances.keys())
+            for inst_id in current_instances:
+                inst = multi_proxy_instances.get(inst_id)
+                if not inst: continue
                 
-                # 1. 检测并清理失效或不符合条件的实例
-                current_instances = list(multi_proxy_instances.keys())
-                for inst_id in current_instances:
-                    inst = multi_proxy_instances.get(inst_id)
-                    if not inst: continue
-                    
-                    # 获取该实例的锁定条件：优先使用实例自身的托管配置，否则使用全局配置
-                    managed_cfg = inst.get("managed_config", {})
-                    if managed_cfg:
-                        current_target_country = managed_cfg.get("target_country")
-                        current_target_ip_type = managed_cfg.get("target_ip_type")
-                    else:
-                        current_target_country = target_country
-                        current_target_ip_type = target_ip_type
+                # 获取该实例的锁定条件：优先使用实例自身的托管配置，否则在全局多节点模式下使用全局配置
+                managed_cfg = inst.get("managed_config")
+                if managed_cfg:
+                    current_target_country = managed_cfg.get("target_country")
+                    current_target_ip_type = managed_cfg.get("target_ip_type")
+                elif routing_mode == "multi_node":
+                    current_target_country = target_country
+                    current_target_ip_type = target_ip_type
+                else:
+                    # 非多节点模式且无独立配置，不进行规则维护（仅进行基本健康检查，由 checker 线程负责，这里跳过或可选处理）
+                    current_target_country = None
+                    current_target_ip_type = None
 
-                    # 检查是否符合锁定的国家条件
-                    if current_target_country and inst.get("country") != current_target_country:
-                        print(f"[多节点管理器] 实例 {inst_id} 不符合国家锁定条件 ({current_target_country})，正在移除...", flush=True)
-                        stop_multi_proxy_instance(inst_id)
-                        continue
-                    
-                    # 检查是否符合锁定的 IP 类型条件
-                    if current_target_ip_type and inst.get("ip_type") != current_target_ip_type:
-                        print(f"[多节点管理器] 实例 {inst_id} 不符合 IP 类型锁定条件 ({current_target_ip_type})，正在移除...", flush=True)
-                        stop_multi_proxy_instance(inst_id)
-                        continue
+                # 检查是否符合锁定的国家条件
+                should_terminate = False
+                if current_target_country and inst.get("country") != current_target_country:
+                    print(f"[多节点管理器] 实例 {inst_id} 不符合国家锁定条件 ({current_target_country})，正在移除并准备更换...", flush=True)
+                    should_terminate = True
+                
+                # 检查是否符合锁定的 IP 类型条件
+                if not should_terminate and current_target_ip_type and inst.get("ip_type") != current_target_ip_type:
+                    print(f"[多节点管理器] 实例 {inst_id} 不符合 IP 类型锁定条件 ({current_target_ip_type})，正在移除并准备更换...", flush=True)
+                    should_terminate = True
 
-                    # 检测连通性
+                # 检测连通性 (仅针对托管实例或全局多节点模式下的实例)
+                if not should_terminate and (managed_cfg or routing_mode == "multi_node"):
                     port = inst.get("proxy_port")
                     health = check_proxy_health_by_port(port)
                     if not health["ok"]:
-                        print(f"[多节点管理器] 实例 {inst_id} (端口 {port}) 连通性检测失败: {health.get('error')}，正在更换...", flush=True)
-                        stop_multi_proxy_instance(inst_id)
+                        print(f"[多节点管理器] 实例 {inst_id} (端口 {port}) 连通性检测失败: {health.get('error')}，正在准备更换...", flush=True)
+                        should_terminate = True
                 
-                # 2. 补齐不足的实例
+                if should_terminate:
+                    stop_multi_proxy_instance(inst_id)
+                    # 如果是手动设置了 managed_config 的实例，需要立即补齐
+                    if managed_cfg:
+                        # 查找合适的节点补齐这个特定端口
+                        nodes = read_json(NODES_FILE, [])
+                        used_node_ids = {i.get("node_id") for i in multi_proxy_instances.values() if i.get("node_id")}
+                        if active_openvpn_node_id: used_node_ids.add(active_openvpn_node_id)
+                        
+                        candidates = [n for n in nodes if n.get("probe_status") == "available" and not n.get("active") and n.get("id") not in used_node_ids]
+                        if current_target_country:
+                            candidates = [n for n in candidates if n.get("country") == current_target_country]
+                        if current_target_ip_type:
+                            candidates = [n for n in candidates if n.get("ip_type") == current_target_ip_type]
+                        
+                        candidates.sort(key=lambda n: (parse_int(n.get("latency_ms")) or 999999, -parse_int(n.get("score"))))
+                        
+                        if candidates:
+                            new_node = candidates[0]
+                            # 保持原有的端口和 TUN 索引（通过 get_next 逻辑会自动找到空闲的，但由于刚停掉，可能需要稍微等一下或直接复用信息）
+                            # 为简单起见，直接再次使用 start 逻辑
+                            p_port = inst.get("proxy_port") or get_next_proxy_port()
+                            t_dev = inst.get("tun_device") or f"tun{get_next_tun_index()}"
+                            start_multi_proxy_instance(inst_id, new_node['id'], p_port, t_dev, managed_config=managed_cfg)
+
+            # --- 第二阶段：全局多节点模式下的自动补齐 ---
+            if routing_mode == "multi_node":
+                target_count = parse_int(ui_cfg.get("multi_node_count", 3))
+                
+                # 补齐不足的实例
                 active_count = len(multi_proxy_instances)
                 if active_count < target_count:
                     nodes = read_json(NODES_FILE, [])
-                    # 排除已在使用的节点 (主出口 + 所有多出口实例)
                     used_node_ids = {inst.get("node_id") for inst in multi_proxy_instances.values() if inst.get("node_id")}
-                    if active_openvpn_node_id:
-                        used_node_ids.add(active_openvpn_node_id)
+                    if active_openvpn_node_id: used_node_ids.add(active_openvpn_node_id)
                         
-                    candidates = [
-                        n for n in nodes 
-                        if n.get("probe_status") == "available" 
-                        and not n.get("active")
-                        and n.get("id") not in used_node_ids
-                    ]
-                    
+                    candidates = [n for n in nodes if n.get("probe_status") == "available" and not n.get("active") and n.get("id") not in used_node_ids]
                     if target_country:
                         candidates = [n for n in candidates if n.get("country") == target_country]
-                    
                     if target_ip_type:
                         candidates = [n for n in candidates if n.get("ip_type") == target_ip_type]
                     
-                    # 按照延迟和分数排序
                     candidates.sort(key=lambda n: (parse_int(n.get("latency_ms")) or 999999, -parse_int(n.get("score"))))
                     
                     needed = target_count - active_count
@@ -4629,31 +4770,17 @@ def multi_node_manager_loop() -> None:
                         proxy_port = get_next_proxy_port()
                         tun_index = get_next_tun_index()
                         tun_device = f"tun{tun_index}"
-                        # 自动管理的实例使用 mp_auto_ 前缀
                         instance_id = f"mp_auto_{node['id'][:8]}_{proxy_port}"
-                        
-                        print(f"[多节点管理器] 正在自动连接新节点: {node['id']} (国家: {node.get('country')}, 端口: {proxy_port})", flush=True)
+                        print(f"[多节点管理器] 正在自动补齐全局实例: {node['id']} (端口: {proxy_port})", flush=True)
                         start_multi_proxy_instance(instance_id, node['id'], proxy_port, tun_device)
-                
-                # 3. 处理手动创建但开启了“托管模式”的实例 (由 API 触发)
-                for inst_id, inst in multi_proxy_instances.items():
-                    managed_cfg = inst.get("managed_config")
-                    if not managed_cfg: continue
-                    
-                    m_country = managed_cfg.get("target_country")
-                    m_ip_type = managed_cfg.get("target_ip_type")
-                    
-                    # 如果该托管实例当前不符合要求，或连通性失败，在上面第一步已经处理了
-                    # 这里不需要额外处理，第一步会自动清理不符合条件的实例，然后第二步会根据全局或未来可能的局部规则补齐
-                    pass
-
             
             else:
-                # 如果不是多节点模式，则自动关闭带有 mp_auto_ 前缀的实例
-                auto_instances = [inst_id for inst_id in multi_proxy_instances.keys() if inst_id.startswith("mp_auto_")]
+                # 非全局多节点模式，清理掉没有 managed_config 的 mp_auto_ 实例
+                auto_instances = [inst_id for inst_id, inst in multi_proxy_instances.items() if inst_id.startswith("mp_auto_") and not inst.get("managed_config")]
                 for inst_id in auto_instances:
-                    print(f"[多节点管理器] 模式已切换，正在停止自动维护的实例 {inst_id}...", flush=True)
+                    print(f"[多节点管理器] 模式切换且无托管配置，正在移除自动实例 {inst_id}...", flush=True)
                     stop_multi_proxy_instance(inst_id)
+
                     
         except Exception as e:
             print(f"[多节点管理器] 循环异常: {e}", flush=True)
@@ -5272,6 +5399,42 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": True})
                 else:
                     self.send_json({"ok": False, "error": "停止实例失败或实例不存在"}, HTTPStatus.BAD_REQUEST)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif effective_path == "/api/multi_proxy/update_managed_config":
+            try:
+                length = parse_int(self.headers.get("Content-Length"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                instance_id = str(payload.get("instance_id") or "")
+                target_country = str(payload.get("target_country") or "").strip()
+                target_ip_type = str(payload.get("target_ip_type") or "").strip()
+                
+                if not instance_id:
+                    self.send_json({"ok": False, "error": "缺少实例 ID"}, HTTPStatus.BAD_REQUEST)
+                    return
+                
+                inst = multi_proxy_instances.get(instance_id)
+                if not inst:
+                    self.send_json({"ok": False, "error": "实例未运行或已断开"}, HTTPStatus.NOT_FOUND)
+                    return
+                
+                managed_cfg = {
+                    "target_country": target_country,
+                    "target_ip_type": target_ip_type
+                }
+                inst["managed_config"] = managed_cfg
+                
+                # 同步到多代理配置文件
+                config = load_multi_proxy_config()
+                for c_inst in config:
+                    if c_inst.get("id") == instance_id:
+                        c_inst["managed_config"] = managed_cfg
+                        break
+                save_multi_proxy_config(config)
+                
+                print(f"[多出口代理] 已更新实例 {instance_id} 的托管配置: 国家={target_country or '不限'}, 类型={target_ip_type or '不限'}", flush=True)
+                self.send_json({"ok": True})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
         
