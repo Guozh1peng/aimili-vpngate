@@ -189,6 +189,7 @@ import shutil
 
 INSTALL_DIR = "/opt/aimilivpn"
 LOG_FILE = "/opt/aimilivpn/vpngate_data/vpngate.log"
+DEPLOY_BRANCH = "bate"
 
 def generate_random_password():
     import random
