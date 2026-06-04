@@ -2570,7 +2570,52 @@ INDEX_HTML = r"""<!doctype html>
       <!-- Rendered dynamically by render() -->
     </section>
 
+    <!-- 统计面板 + 代理出口检测 -->
+    <div class="flex-row-container">
+      <section class="stats" style="margin-bottom: 0;">
+        <div class="stat">
+          <div class="stat-info">
+            <strong id="total">0</strong>
+            <span>备选节点池</span>
+          </div>
+          <div class="stat-icon-wrapper">
+            <svg class="stat-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-info">
+            <strong id="target">3</strong>
+            <span>目标可用数</span>
+          </div>
+          <div class="stat-icon-wrapper">
+            <svg class="stat-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-info">
+            <strong id="active">0</strong>
+            <span>活动连接</span>
+          </div>
+          <div class="stat-icon-wrapper">
+            <svg class="stat-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+          </div>
+        </div>
+      </section>
+    </div>
 
+    <!-- 代理出口状态检测卡片 -->
+    <div class="stat" style="margin-bottom: 24px; border-radius: 12px; padding: 20px; background: var(--bg-surface); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border-color);">
+      <div class="stat-info" style="gap: 6px;">
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <span id="proxy_status_badge" class="badge not_checked">未检测</span>
+          <strong id="proxy_ip_val" style="font-size: 20px; background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">-</strong>
+        </div>
+        <span style="font-size: 13px; color: var(--text-secondary);">代理出口状态 <span id="proxy_latency_val"></span></span>
+      </div>
+      <button id="btn_test_proxy" class="test-btn" style="height: 36px; padding: 0 14px; white-space: nowrap;">
+        <svg xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> 测试代理
+      </button>
+    </div>
 
   <section class="toolbar">
     <select id="country_filter">
@@ -3401,6 +3446,25 @@ async function disconnectNode(){
       try {
         await fetch("./api/test_proxy", { method: "POST" });
       } catch(pe){}
+      load();
+    } else {
+      alert("断开连接失败: " + (result.error || "未知错误"));
+    }
+  } catch (e) {
+    alert("请求断开连接失败");
+  }
+}
+
+async function stopMultiProxyInstance(instanceId) {
+  if (!confirm("确定要断开该多出口代理连接吗？")) return;
+  try {
+    const response = await fetch("./api/multi_proxy/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instance_id: instanceId })
+    });
+    const result = await response.json();
+    if (result.ok) {
       load();
     } else {
       alert("断开连接失败: " + (result.error || "未知错误"));
