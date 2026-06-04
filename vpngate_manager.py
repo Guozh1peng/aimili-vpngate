@@ -2966,6 +2966,7 @@ INDEX_HTML = r"""<!doctype html>
 </main>
 <script>
 let nodes=[], state={}, testingNodeIds = new Set();
+const proxyPortTestResults = new Map();
 let currentPage = 1;
 const pageSize = 11;
 let currentPageNodes = [];
@@ -3135,15 +3136,23 @@ function render(){
     });
   }
   multiProxies.forEach(mp => {
-    const node = nodes.find(n => n && n.id === mp.node_id);
-    if (node) {
-      connectedNodes.push({
-        ...node,
-        proxyPort: mp.proxy_port,
-        instanceId: mp.id,
-        isMain: false
-      });
-    }
+    const node = nodes.find(n => n && n.id === mp.node_id) || {};
+    const portResult = proxyPortTestResults.get(Number(mp.proxy_port));
+    connectedNodes.push({
+      ...node,
+      proxyPort: mp.proxy_port,
+      instanceId: mp.id,
+      isMain: false,
+      managed_config: mp.managed_config,
+      country: mp.country || node.country,
+      ip: mp.ip || node.ip,
+      location: mp.location || node.location,
+      ip_type: mp.ip_type || node.ip_type,
+      exit_ok: portResult ? portResult.ok : mp.exit_ok,
+      exit_ip: portResult ? portResult.ip : mp.exit_ip,
+      exit_latency: portResult ? portResult.latency_ms : mp.exit_latency,
+      exit_error: portResult ? portResult.error : mp.exit_error
+    });
   });
   
   if (state.is_connecting && !activeNode) {
@@ -3232,7 +3241,7 @@ function render(){
   
   if ($("total")) $("total").textContent = nodes.length; 
   if ($("target")) $("target").textContent = state.target_valid_nodes || 3;
-  if ($("active")) $("active").textContent = activeNode ? 1 : 0; 
+  if ($("active")) $("active").textContent = connectedNodes.length; 
   
   const statusMessage = state.last_check_message || "";
   const activeNodeInfo = activeNode ? `<span class="badge available" style="margin-left:8px; padding:2px 8px;">${esc(translateCountry(activeNode.country))} (${activeNode.id})</span>` : `<span class="badge unavailable" style="margin-left:8px; padding:2px 8px;">无</span>`;
@@ -3265,10 +3274,10 @@ function render(){
             proxyLatency = state.proxy_latency_ms || 0;
             proxyError = state.proxy_error || "";
         } else {
-            // 查找多出口实例的实时测试数据 (如果有的话，目前后端主要推主出口，我们先做 UI 兼容)
             proxyIp = node.exit_ip || "-";
             proxyLatency = node.exit_latency || 0;
-            proxyOk = !!node.exit_ip;
+            proxyError = node.exit_error || "";
+            proxyOk = !!node.exit_ok || (!!node.exit_ip && node.exit_ip !== "检测失败");
         }
 
         let badgeHtml = '<span class="badge not_checked">未检测</span>';
@@ -3285,7 +3294,7 @@ function render(){
         const subText = isCurrentlyConnecting ? (state.last_check_message || "正在建立隧道...") : `代理端口: ${port} ${latText}`;
 
         return `
-          <div class="stat" style="border-radius: 12px; padding: 16px 20px; background: var(--bg-surface); border: 1px solid var(--border-color); animation: fadeIn 0.3s ease-out;">
+          <div class="stat" data-proxy-port="${port}" style="border-radius: 12px; padding: 16px 20px; background: var(--bg-surface); border: 1px solid var(--border-color); animation: fadeIn 0.3s ease-out;">
             <div class="stat-info" style="gap: 4px;">
               <div style="display: flex; align-items: center; gap: 10px;">
                 ${badgeHtml}
@@ -4050,14 +4059,7 @@ async function testProxyPort(port, btn) {
   const exitsContainer = $("proxy_exits_container");
   if (!exitsContainer) return;
   
-  const items = exitsContainer.querySelectorAll(".stat");
-  let targetItem = null;
-  for (let item of items) {
-     if (item.innerText.includes("代理端口: " + port)) {
-         targetItem = item;
-         break;
-     }
-  }
+  const targetItem = exitsContainer.querySelector(`[data-proxy-port="${port}"]`);
 
   if (targetItem) {
     const badge = targetItem.querySelector(".badge");
@@ -4088,15 +4090,32 @@ async function testProxyPort(port, btn) {
         state.proxy_error = data.error || "";
     } else {
         // 更新多出口列表中的局部数据
-        const inst = state.multi_proxies.find(m => m.proxy_port === port);
+        const multiProxies = state.multi_proxies || [];
+        const inst = multiProxies.find(m => Number(m.proxy_port) === Number(port));
+        proxyPortTestResults.set(Number(port), {
+            ok: !!data.ok,
+            ip: data.ok ? (data.ip || "-") : "检测失败",
+            latency_ms: data.latency_ms || 0,
+            error: data.error || ""
+        });
         if (inst) {
-            inst.exit_ip = data.ip || (data.ok ? data.ip : "检测失败");
+            inst.exit_ok = !!data.ok;
+            inst.exit_ip = data.ok ? (data.ip || "-") : "检测失败";
             inst.exit_latency = data.latency_ms || 0;
+            inst.exit_error = data.error || "";
         }
     }
     render();
   } catch (e) {
     console.error("检测请求失败", e);
+    if (port !== (state.proxy_port || 7928)) {
+        proxyPortTestResults.set(Number(port), {
+            ok: false,
+            ip: "检测失败",
+            latency_ms: 0,
+            error: "请求失败: " + e
+        });
+    }
     render();
   } finally {
     if (btn) btn.disabled = false;
@@ -5002,7 +5021,9 @@ class Handler(BaseHTTPRequestHandler):
                     "tun_device": inst.get("tun_device"),
                     "country": inst.get("country"),
                     "ip": inst.get("ip"),
-                    "location": inst.get("location")
+                    "location": inst.get("location"),
+                    "ip_type": inst.get("ip_type"),
+                    "managed_config": inst.get("managed_config")
                 }
                 for inst_id, inst in multi_proxy_instances.items()
             ]
