@@ -2768,11 +2768,11 @@ INDEX_HTML = r"""<!doctype html>
 
   <!-- Gateway Modal (网关自检与代理测试) -->
   <div id="gateway_modal" class="modal">
-    <div class="modal-content" style="max-width: 600px; width: 90%;">
+    <div class="modal-content" style="max-width: 700px; width: 90%;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
         <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
           <svg xmlns="http://www.w3.org/2000/svg" style="width:20px; height:20px; color: var(--primary);" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-          网关运行状态与自检
+          网关运行状态与代理检测
         </h3>
         <button type="button" onclick="closeGatewayModal()" style="background: transparent; border: none; padding: 4px; cursor: pointer; color: var(--text-secondary); width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
           <svg xmlns="http://www.w3.org/2000/svg" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -2780,7 +2780,7 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <!-- 服务列表 -->
-      <div id="gateway_services_list" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px;">
+      <div id="gateway_services_list" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
         <div style="text-align: center; color: var(--text-secondary); padding: 20px 0;">
           <svg style="animation: spin 1s linear infinite; width: 20px; height: 20px; display: inline-block; margin-bottom: 8px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.2" fill="none"></circle><path d="M4 12a8 8 0 018-8" stroke="currentColor" fill="none"></path></svg>
           <div>正在加载系统网关状态...</div>
@@ -2788,36 +2788,21 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <!-- 分割线 -->
-      <div style="border-top: 1px dashed rgba(255, 255, 255, 0.08); margin: 20px 0;"></div>
+      <div style="border-top: 1px dashed rgba(255, 255, 255, 0.08); margin: 16px 0;"></div>
 
-      <!-- 本地代理出口检测 -->
-      <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px;">
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-          <div class="stat-icon-wrapper" style="background: rgba(99, 102, 241, 0.1); border-color: rgba(99, 102, 241, 0.2); width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0;">
-            <svg xmlns="http://www.w3.org/2000/svg" class="stat-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color: var(--primary); width: 18px; height: 18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071a10.5 10.5 0 0114.14 0M1.414 8.05a16 16 0 0121.172 0" /></svg>
-          </div>
-          <div>
-            <h4 style="margin: 0; font-size: 14px; font-weight: 600; color: var(--text-primary);">本地代理出口检测</h4>
-            <p style="margin: 2px 0 0 0; font-size: 12px; color: var(--text-secondary);">检测 HTTP/SOCKS5 代理出站连通性与 IP</p>
-          </div>
+      <!-- 所有代理出口检测 -->
+      <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: var(--text-primary);">代理出口连通性检测</h4>
+      <div id="gateway_proxy_tests" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+        <div style="text-align: center; color: var(--text-secondary); padding: 16px 0; background: rgba(255,255,255,0.02); border-radius: 8px;">
+          点击下方按钮检测所有已连接节点的代理出口状态
         </div>
-        
-        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 12px; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
-          <div style="font-size: 13px; color: var(--text-secondary);">
-            测试状态: <span id="proxy_status_badge" class="badge not_checked" style="margin-left: 4px;">未检测</span>
-          </div>
-          <div style="font-size: 13px; color: var(--text-secondary); text-align: right;">
-            出口 IP: <span id="proxy_ip_val" class="mono" style="font-weight: 600; color: var(--text-primary);">-</span> 
-            <span id="proxy_latency_val" style="margin-left: 6px;"></span>
-          </div>
-        </div>
-
-        <div style="display: flex; gap: 12px; justify-content: flex-end;">
-          <button id="btn_test_proxy" class="btn-primary" style="height: 36px; padding: 0 16px; font-size: 13px;">
-            <svg xmlns="http://www.w3.org/2000/svg" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            开始检测
-          </button>
-        </div>
+      </div>
+      
+      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+        <button id="btn_test_all_proxies" class="btn-primary" style="height: 36px; padding: 0 16px; font-size: 13px;" onclick="testAllProxyPorts()">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          检测所有出口
+        </button>
       </div>
       
       <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
@@ -3904,6 +3889,106 @@ function renderGatewayServices(services) {
   container.innerHTML = html;
 }
 
+async function testAllProxyPorts() {
+  const container = $("gateway_proxy_tests");
+  const connectedNodes = [];
+  
+  if (state.active_openvpn_node_id) {
+    connectedNodes.push({
+      port: state.proxy_port || 7928,
+      country: "主出口",
+      isMain: true
+    });
+  }
+  
+  const multiProxies = state.multi_proxies || [];
+  multiProxies.forEach(mp => {
+    connectedNodes.push({
+      port: mp.proxy_port,
+      country: mp.country || mp.location || "节点",
+      isMain: false
+    });
+  });
+  
+  if (connectedNodes.length === 0) {
+    container.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 16px 0; background: rgba(255,255,255,0.02); border-radius: 8px;">当前没有已连接的节点</div>';
+    return;
+  }
+  
+  container.innerHTML = connectedNodes.map(n => `
+    <div id="proxy_test_${n.port}" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-weight: 600; color: var(--text-primary);">${esc(n.country)}</span>
+          ${n.isMain ? '<span style="font-size: 11px; background: rgba(99,102,241,0.15); color: #818cf8; padding: 2px 6px; border-radius: 4px;">主出口</span>' : ''}
+        </div>
+        <span class="badge" style="background: rgba(245,158,11,0.15); color: #f59e0b;">检测中...</span>
+      </div>
+      <div style="font-size: 13px; color: var(--text-secondary);">
+        端口: <span style="color: var(--primary); font-weight: 600;">${n.port}</span>
+        <span style="margin-left: 12px;">出口 IP: <span class="mono">-</span></span>
+        <span style="margin-left: 12px;">延迟: <span>-</span></span>
+      </div>
+    </div>
+  `).join("");
+  
+  for (const n of connectedNodes) {
+    testSingleProxyPort(n.port, n.country, n.isMain);
+  }
+}
+
+async function testSingleProxyPort(port, country, isMain) {
+  const container = $(`proxy_test_${port}`);
+  if (!container) return;
+  
+  try {
+    const r = await fetch("./api/test_proxy_port", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ port })
+    });
+    const result = await r.json();
+    
+    const statusBadge = result.ok 
+      ? '<span class="badge available"><span class="badge-pulse"></span>可用</span>'
+      : '<span class="badge unavailable">不可用</span>';
+    
+    const ipText = result.ok ? result.ip : "-";
+    const latencyText = result.ok ? `${result.latency_ms} ms` : "-";
+    
+    container.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-weight: 600; color: var(--text-primary);">${esc(country)}</span>
+          ${isMain ? '<span style="font-size: 11px; background: rgba(99,102,241,0.15); color: #818cf8; padding: 2px 6px; border-radius: 4px;">主出口</span>' : ''}
+        </div>
+        ${statusBadge}
+      </div>
+      <div style="font-size: 13px; color: var(--text-secondary);">
+        端口: <span style="color: var(--primary); font-weight: 600;">${port}</span>
+        <span style="margin-left: 12px;">出口 IP: <span class="mono">${esc(ipText)}</span></span>
+        <span style="margin-left: 12px;">延迟: <span>${esc(latencyText)}</span></span>
+      </div>
+      ${!result.ok && result.error ? `
+        <div style="font-size: 11px; color: var(--danger); margin-top: 6px;">错误: ${esc(result.error)}</div>
+      ` : ''}
+    `;
+  } catch(e) {
+    container.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-weight: 600; color: var(--text-primary);">${esc(country)}</span>
+          ${isMain ? '<span style="font-size: 11px; background: rgba(99,102,241,0.15); color: #818cf8; padding: 2px 6px; border-radius: 4px;">主出口</span>' : ''}
+        </div>
+        <span class="badge unavailable">检测失败</span>
+      </div>
+      <div style="font-size: 13px; color: var(--text-secondary);">
+        端口: <span style="color: var(--primary); font-weight: 600;">${port}</span>
+      </div>
+    `;
+  }
+}
+
 let logsPollInterval = null;
 let rawLogsCache = [];
 
@@ -4251,6 +4336,45 @@ def check_proxy_health() -> dict[str, Any]:
         return {"ok": False, "error": "出口连接测试失败 (ip.sb 和 api.ipify.org 均无法连通，可能是节点已失效或 VPS 防火墙限制了 UDP/TCP 出站端口)"}
     except Exception as e:
         return {"ok": False, "error": f"出口连接测试异常: {e}"}
+
+def check_proxy_health_by_port(port: int) -> dict[str, Any]:
+    def _curl_check_ip(url: str, proxy_port: int) -> dict[str, Any] | None:
+        proxy_hosts = ["127.0.0.1"]
+        for p_host in proxy_hosts:
+            proxy_url = f"socks5h://{p_host}:{proxy_port}"
+            cmd = [
+                "curl", "-s",
+                "-w", "\n%{time_total} %{http_code}",
+                "-x", proxy_url,
+                url,
+                "--max-time", "5"
+            ]
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
+                if res.returncode == 0:
+                    lines = res.stdout.strip().splitlines()
+                    if len(lines) >= 2:
+                        ip = lines[0].strip()
+                        time_info = lines[1].strip().split()
+                        if len(time_info) == 2:
+                            total_time_str, http_code = time_info
+                            if http_code == "200" and ip:
+                                latency_ms = int(float(total_time_str) * 1000)
+                                return {"ok": True, "ip": ip, "latency_ms": latency_ms}
+            except Exception:
+                pass
+        return None
+    
+    try:
+        result = _curl_check_ip("http://ip.sb", port)
+        if result:
+            return result
+        result = _curl_check_ip("http://api.ipify.org", port)
+        if result:
+            return result
+        return {"ok": False, "error": "无法连接到代理端口或出口不可用"}
+    except Exception as e:
+        return {"ok": False, "error": f"检测异常: {e}"}
 
 def background_proxy_checker() -> None:
     global last_checker_heartbeat
@@ -4921,6 +5045,21 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": True})
                 else:
                     self.send_json({"ok": False, "error": "停止实例失败或实例不存在"}, HTTPStatus.BAD_REQUEST)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        
+        elif effective_path == "/api/test_proxy_port":
+            try:
+                length = parse_int(self.headers.get("Content-Length"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                port = parse_int(payload.get("port"))
+                
+                if not port or port < 1 or port > 65535:
+                    self.send_json({"ok": False, "error": "无效的端口号"}, HTTPStatus.BAD_REQUEST)
+                    return
+                
+                result = check_proxy_health_by_port(port)
+                self.send_json(result)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
         
