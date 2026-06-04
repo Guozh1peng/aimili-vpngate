@@ -379,6 +379,7 @@ def format_line(label, value, target_width=26):
 def print_line(text=""):
     print(f"{text}\033[K")
 
+def print_status():
     cfg = load_ui_cfg()
     ui_port = cfg.get("port", 8787)
     secret_path = cfg.get("secret_path", "EJsW2EeBo9lY")
