@@ -869,6 +869,139 @@ def sort_all_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
     return available_nodes + untested_nodes + unavailable_nodes
 
+def switch_filter_label(target_country: str = "", target_ip_type: str = "") -> str:
+    parts = []
+    if target_country:
+        parts.append(target_country)
+    if target_ip_type:
+        parts.append({
+            "residential": "住宅 IP",
+            "hosting": "机房 IP",
+            "mobile": "移动网",
+            "proxy": "代理 IP",
+        }.get(target_ip_type, target_ip_type))
+    return " / ".join(parts) if parts else "当前节点同类"
+
+def connected_node_ids() -> set[str]:
+    ids: set[str] = set()
+    if active_openvpn_node_id:
+        ids.add(active_openvpn_node_id)
+    with lock:
+        for inst in multi_proxy_instances.values():
+            node_id = inst.get("node_id")
+            if node_id:
+                ids.add(str(node_id))
+    return ids
+
+def replacement_candidates(
+    target_country: str = "",
+    target_ip_type: str = "",
+    exclude_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    excluded = exclude_ids or set()
+    nodes = read_json(NODES_FILE, [])
+    candidates = []
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        if not node_id or node_id in excluded:
+            continue
+        if node.get("probe_status") != "available":
+            continue
+        if target_country and node.get("country") != target_country:
+            continue
+        if target_ip_type and node.get("ip_type") != target_ip_type:
+            continue
+        candidates.append(node)
+    candidates.sort(key=lambda n: (parse_int(n.get("latency_ms")) or 999999, -parse_int(n.get("score"))))
+    return candidates
+
+def probe_matching_replacement_nodes(
+    target_country: str = "",
+    target_ip_type: str = "",
+    exclude_ids: set[str] | None = None,
+    limit: int = 8,
+) -> None:
+    excluded = exclude_ids or set()
+    nodes = read_json(NODES_FILE, [])
+    to_test = []
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        if not node_id or node_id in excluded:
+            continue
+        if node.get("probe_status") != "not_checked":
+            continue
+        if target_country and node.get("country") != target_country:
+            continue
+        # Untested nodes often have no IP type until enrichment succeeds. If the
+        # type is already known and conflicts with the lock, skip it.
+        if target_ip_type and node.get("ip_type") and node.get("ip_type") != target_ip_type:
+            continue
+        to_test.append(node)
+    to_test.sort(key=lambda n: (-parse_int(n.get("score")), parse_int(n.get("ping")) or 999999))
+    ids = [n["id"] for n in to_test[:limit]]
+    if not ids:
+        return
+    filter_text = switch_filter_label(target_country, target_ip_type)
+    set_state(last_check_message=f"正在检测符合【{filter_text}】条件的备用节点...")
+    log_to_json("INFO", "VPN", f"一键更换节点: 开始检测符合【{filter_text}】条件的备用节点 {ids}")
+    test_multiple_nodes(ids)
+
+def find_replacement_node(
+    current_node_id: str,
+    target_country: str = "",
+    target_ip_type: str = "",
+    exclude_ids: set[str] | None = None,
+) -> dict[str, Any] | None:
+    excluded = set(exclude_ids or set())
+    if current_node_id:
+        excluded.add(current_node_id)
+
+    candidates = replacement_candidates(target_country, target_ip_type, excluded)
+    if candidates:
+        return candidates[0]
+
+    probe_matching_replacement_nodes(target_country, target_ip_type, excluded)
+    candidates = replacement_candidates(target_country, target_ip_type, excluded)
+    if candidates:
+        return candidates[0]
+    return None
+
+def main_switch_filters(current_node: dict[str, Any]) -> tuple[str, str]:
+    ui_cfg = load_ui_config()
+    routing_mode = ui_cfg.get("routing_mode", "auto")
+    if routing_mode in ("fixed_region", "multi_node") and ui_cfg.get("force_country"):
+        target_country = str(ui_cfg.get("force_country") or "")
+    else:
+        target_country = str(current_node.get("country") or "")
+    target_ip_type = str(ui_cfg.get("force_ip_type") or current_node.get("ip_type") or "")
+    return target_country, target_ip_type
+
+def switch_main_node() -> str:
+    if is_connecting:
+        raise RuntimeError("当前已有连接任务正在执行，请稍后再试")
+    if not active_openvpn_node_id:
+        raise RuntimeError("当前没有主出口连接可更换")
+
+    nodes = read_json(NODES_FILE, [])
+    current_node = next((n for n in nodes if n.get("id") == active_openvpn_node_id), None)
+    if not current_node:
+        raise RuntimeError("当前主出口节点信息不存在，请刷新节点列表后重试")
+
+    target_country, target_ip_type = main_switch_filters(current_node)
+    filter_text = switch_filter_label(target_country, target_ip_type)
+    replacement = find_replacement_node(
+        str(current_node.get("id") or ""),
+        target_country,
+        target_ip_type,
+        connected_node_ids(),
+    )
+    if not replacement:
+        raise RuntimeError(f"没有找到符合【{filter_text}】条件的其他可用节点，请先刷新节点或放宽锁定条件")
+
+    new_node_id = str(replacement.get("id") or "")
+    log_to_json("INFO", "VPN", f"一键更换主出口: {active_openvpn_node_id} -> {new_node_id} (条件: {filter_text})")
+    return connect_node(new_node_id)
+
 active_test_indexes = set()
 test_indexes_lock = threading.Lock()
 
@@ -2957,6 +3090,7 @@ INDEX_HTML = r"""<!doctype html>
 </main>
 <script>
 let nodes=[], state={}, testingNodeIds = new Set();
+const switchingConnections = new Set();
 const proxyPortTestResults = new Map();
 let currentPage = 1;
 const pageSize = 11;
@@ -3173,6 +3307,10 @@ function render(){
       const mainBadge = node.isMain ? '<span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border-color: rgba(99, 102, 241, 0.3); margin-left: 8px;">主出口</span>' : '';
       const isManaged = !node.isMain && node.managed_config && (node.managed_config.target_country || node.managed_config.target_ip_type);
       const lockedText = isManaged ? ' <span style="color: var(--primary); font-size: 11px;">(已锁定)</span>' : '';
+      const switchKey = node.isMain ? "main" : `multi:${node.instanceId}`;
+      const isSwitching = switchingConnections.has(switchKey) || (node.isMain && state.is_connecting);
+      const switchAction = node.isMain ? "switchConnectedNode('main')" : `switchConnectedNode('multi', '${esc(node.instanceId)}')`;
+      const switchLabel = isSwitching ? "更换中" : "更换节点";
 
       return `
         <div class="active-card" style="${idx > 0 ? 'margin-top: 12px;' : ''}">
@@ -3196,9 +3334,13 @@ function render(){
               </div>
             </div>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
+          <div style="display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap;">
             <button class="test-btn" style="height: 38px; width: 38px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px;" title="锁定设置" onclick="${node.isMain ? 'openNetworkModal()' : `openInstanceModal('${node.instanceId}', ${node.proxyPort})`}">
               <svg xmlns="http://www.w3.org/2000/svg" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            </button>
+            <button class="test-btn" style="height: 38px; padding: 0 14px; border-radius: 8px; display: flex; align-items: center; gap: 6px; white-space: nowrap; ${isSwitching ? 'opacity:0.65; cursor:not-allowed;' : ''}" onclick="${switchAction}" ${isSwitching ? 'disabled' : ''} title="按当前锁定条件更换为另一个可用节点">
+              <svg xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px; ${isSwitching ? 'animation: spin 1s linear infinite;' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 5.64L4 8m16 8l-2.34 2.36A8 8 0 014 15" /></svg>
+              ${switchLabel}
             </button>
             <button class="btn-danger" style="height: 38px; padding: 0 16px; border-radius: 8px; display: flex; align-items: center; gap: 6px;" onclick="${node.isMain ? 'disconnectNode()' : `stopMultiProxyInstance('${node.instanceId}')`}">
               <svg xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -3493,6 +3635,73 @@ async function connectNode(id){
       pollInterval = null;
     }
     state.is_connecting = false;
+    render();
+  }
+}
+
+async function switchConnectedNode(kind, instanceId = "") {
+  const isMain = kind === "main";
+  const switchKey = isMain ? "main" : `multi:${instanceId}`;
+  if (switchingConnections.has(switchKey)) return;
+  if (isMain && state.is_connecting) {
+    alert("主出口正在连接中，请稍候...");
+    return;
+  }
+
+  switchingConnections.add(switchKey);
+  if (isMain) {
+    state.is_connecting = true;
+    state.active_node_latency = "正在更换";
+    state.last_check_message = "正在按当前锁定条件更换为另一个可用节点...";
+    startConnectionPolling();
+  }
+  render();
+
+  try {
+    const endpoint = isMain ? "./api/switch_node" : "./api/multi_proxy/switch";
+    const body = isMain ? {} : { instance_id: instanceId };
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const result = await response.json();
+    if (!result.ok) {
+      alert("更换节点失败: " + (result.error || "未知错误"));
+      if (isMain && pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      if (isMain) state.is_connecting = false;
+      await load();
+      return;
+    }
+    if (isMain) {
+      try { await fetch("./api/test_proxy", { method: "POST" }); } catch(pe){}
+    } else {
+      const inst = (state.multi_proxies || []).find(mp => mp.id === instanceId);
+      if (inst && inst.proxy_port) {
+        try {
+          const portResult = await fetch("./api/test_proxy_port", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ port: inst.proxy_port })
+          });
+          proxyPortTestResults.set(Number(inst.proxy_port), await portResult.json());
+        } catch(pe){}
+      }
+    }
+    await load();
+  } catch (e) {
+    alert("更换节点请求失败: " + e);
+    if (isMain && pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+    if (isMain) state.is_connecting = false;
+    await load();
+  } finally {
+    switchingConnections.delete(switchKey);
     render();
   }
 }
@@ -4552,6 +4761,132 @@ def stop_multi_proxy_instance(instance_id: str) -> bool:
     log_to_json("INFO", "MultiProxy", f"已停止多出口代理实例: {instance_id}")
     return True
 
+def upsert_multi_proxy_config(instance_id: str, inst: dict[str, Any]) -> None:
+    config = load_multi_proxy_config()
+    payload = {
+        "id": instance_id,
+        "node_id": inst.get("node_id"),
+        "proxy_port": inst.get("proxy_port"),
+        "tun_device": inst.get("tun_device"),
+        "country": inst.get("country", ""),
+        "ip": inst.get("ip", ""),
+        "location": inst.get("location", ""),
+        "ip_type": inst.get("ip_type", ""),
+        "managed_config": inst.get("managed_config"),
+    }
+    for idx, item in enumerate(config):
+        if item.get("id") == instance_id:
+            config[idx] = payload
+            break
+    else:
+        config.append(payload)
+    save_multi_proxy_config(config)
+
+def multi_switch_filters(inst: dict[str, Any], current_node: dict[str, Any]) -> tuple[str, str]:
+    managed_cfg = inst.get("managed_config") or {}
+    if managed_cfg:
+        target_country = str(managed_cfg.get("target_country") or current_node.get("country") or "")
+        target_ip_type = str(managed_cfg.get("target_ip_type") or current_node.get("ip_type") or "")
+        return target_country, target_ip_type
+
+    ui_cfg = load_ui_config()
+    if ui_cfg.get("routing_mode") == "multi_node":
+        target_country = str(ui_cfg.get("force_country") or current_node.get("country") or "")
+        target_ip_type = str(ui_cfg.get("force_ip_type") or current_node.get("ip_type") or "")
+    else:
+        target_country = str(current_node.get("country") or inst.get("country") or "")
+        target_ip_type = str(current_node.get("ip_type") or inst.get("ip_type") or "")
+    return target_country, target_ip_type
+
+def switch_multi_proxy_instance(instance_id: str) -> str:
+    inst = multi_proxy_instances.get(instance_id)
+    if not inst:
+        raise RuntimeError("该多出口实例未运行或已断开")
+
+    current_node_id = str(inst.get("node_id") or "")
+    nodes = read_json(NODES_FILE, [])
+    current_node = next((n for n in nodes if n.get("id") == current_node_id), None)
+    if not current_node:
+        current_node = {
+            "id": current_node_id,
+            "country": inst.get("country", ""),
+            "ip_type": inst.get("ip_type", ""),
+            "config_text": "",
+        }
+
+    target_country, target_ip_type = multi_switch_filters(inst, current_node)
+    filter_text = switch_filter_label(target_country, target_ip_type)
+    replacement = find_replacement_node(
+        current_node_id,
+        target_country,
+        target_ip_type,
+        connected_node_ids(),
+    )
+    if not replacement:
+        raise RuntimeError(f"没有找到符合【{filter_text}】条件的其他可用节点，请先刷新节点或放宽锁定条件")
+
+    proxy_port = parse_int(inst.get("proxy_port"))
+    tun_device = str(inst.get("tun_device") or "")
+    if not proxy_port or not tun_device:
+        raise RuntimeError("实例端口或 TUN 设备信息不完整，无法原地更换节点")
+
+    config_path = Path(inst.get("config_file") or (CONFIG_DIR / f"multi_{instance_id}.ovpn"))
+    old_process = inst.get("process")
+    old_node_id = current_node_id
+    new_node_id = str(replacement.get("id") or "")
+    log_to_json("INFO", "MultiProxy", f"一键更换多出口实例 {instance_id}: {old_node_id} -> {new_node_id} (条件: {filter_text})")
+
+    stop_process(old_process)
+    try:
+        CONFIG_DIR.mkdir(exist_ok=True, parents=True)
+        config_path.write_text(replacement.get("config_text") or "", encoding="utf-8")
+    except Exception as exc:
+        raise RuntimeError(f"写入新节点配置失败: {exc}") from exc
+
+    ok, message, process = run_openvpn_until_ready(
+        str(config_path),
+        keep_alive=True,
+        route_nopull=True,
+        dev=tun_device,
+    )
+    if not ok or process is None:
+        restore_ok = False
+        restore_msg = ""
+        if current_node.get("config_text"):
+            try:
+                config_path.write_text(current_node.get("config_text") or "", encoding="utf-8")
+                restore_ok, restore_msg, restore_process = run_openvpn_until_ready(
+                    str(config_path),
+                    keep_alive=True,
+                    route_nopull=True,
+                    dev=tun_device,
+                )
+                if restore_ok and restore_process is not None:
+                    inst["process"] = restore_process
+                    multi_proxy_instances[instance_id] = inst
+            except Exception as exc:
+                restore_msg = str(exc)
+
+        if restore_ok:
+            raise RuntimeError(f"新节点连接失败，已恢复原节点。失败原因: {message}")
+        raise RuntimeError(f"新节点连接失败，且原节点恢复失败，请手动重新连接该端口。失败原因: {message}; 恢复结果: {restore_msg}")
+
+    inst.update({
+        "node_id": new_node_id,
+        "proxy_port": proxy_port,
+        "tun_device": tun_device,
+        "config_file": str(config_path),
+        "process": process,
+        "country": replacement.get("country", ""),
+        "ip": replacement.get("ip") or replacement.get("remote_host", ""),
+        "location": replacement.get("location") or replacement.get("country", ""),
+        "ip_type": replacement.get("ip_type", ""),
+    })
+    multi_proxy_instances[instance_id] = inst
+    upsert_multi_proxy_config(instance_id, inst)
+    log_to_json("INFO", "MultiProxy", f"多出口实例 {instance_id} 已更换至节点 {new_node_id}，端口保持 {proxy_port}")
+    return f"多出口端口 {proxy_port} 已更换至 {new_node_id}"
+
 def restore_multi_proxy_instances() -> None:
     config = load_multi_proxy_config()
     for inst in config:
@@ -5391,6 +5726,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "message": connect_node(str(payload.get("id") or ""))})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        elif effective_path == "/api/switch_node":
+            try:
+                length = parse_int(self.headers.get("Content-Length"))
+                if length > 0:
+                    self.rfile.read(length)
+                self.send_json({"ok": True, "message": switch_main_node()})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
         elif effective_path == "/api/test_node":
             try:
                 length = parse_int(self.headers.get("Content-Length"))
@@ -5508,6 +5851,20 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": True})
                 else:
                     self.send_json({"ok": False, "error": "停止实例失败或实例不存在"}, HTTPStatus.BAD_REQUEST)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif effective_path == "/api/multi_proxy/switch":
+            try:
+                length = parse_int(self.headers.get("Content-Length"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                instance_id = str(payload.get("instance_id") or "")
+
+                if not instance_id:
+                    self.send_json({"ok": False, "error": "缺少实例 ID"}, HTTPStatus.BAD_REQUEST)
+                    return
+
+                self.send_json({"ok": True, "message": switch_multi_proxy_instance(instance_id)})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
