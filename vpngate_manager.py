@@ -682,13 +682,14 @@ def stop_process(process: subprocess.Popen[str] | None) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
 
-def kill_existing_openvpn_processes() -> None:
+def kill_existing_openvpn_processes(include_multi: bool = True) -> None:
     if not sys.platform.startswith("linux"):
         return
     try:
-        # Terminate existing openvpn processes managing tun0 or using our vpngate configuration
+        # Terminate stale primary OpenVPN processes. Multi-exit instances use tun1+.
         subprocess.run(["pkill", "-f", "openvpn.*tun0"], capture_output=True, timeout=2)
-        subprocess.run(["pkill", "-f", "openvpn.*vpngate_data"], capture_output=True, timeout=2)
+        if include_multi:
+            subprocess.run(["pkill", "-f", "openvpn.*vpngate_data"], capture_output=True, timeout=2)
         print("[Cleanup] Terminated existing AimiliVPN OpenVPN processes.", flush=True)
     except Exception as e:
         print(f"[Cleanup Error] Failed to kill existing OpenVPN processes: {e}", flush=True)
@@ -840,7 +841,7 @@ def stop_active_openvpn() -> None:
     stop_process(active_openvpn_process)
     active_openvpn_process = None
     active_openvpn_node_id = ""
-    kill_existing_openvpn_processes()
+    kill_existing_openvpn_processes(include_multi=False)
     
     if config_to_delete:
         try:
@@ -1313,24 +1314,14 @@ def maintain_valid_nodes(force: bool = False) -> str:
         with lock:
             merged = read_json(NODES_FILE, [])
             if not active_openvpn_running():
-                ui_cfg = load_ui_config()
-                routing_mode = ui_cfg.get("routing_mode", "auto")
-                target_country = ui_cfg.get("force_country", "")
-                target_ip_type = ui_cfg.get("force_ip_type", "")
-                
-                if routing_mode == "fixed_ip":
-                    if active_openvpn_node_id:
-                        auto_switch_node()
+                if active_openvpn_node_id:
+                    auto_switch_node()
+                elif multi_proxy_instances:
+                    print("[维护线程] 检测到已有多出口代理实例，跳过主出口自动连接，避免覆盖手动配置的多出口端口。", flush=True)
+                    log_to_json("INFO", "VPN", "已有多出口代理实例，刷新节点后不自动创建主出口")
                 else:
-                    available_candidates = [n for n in merged if n.get("probe_status") == "available"]
-                    if (routing_mode == "fixed_region" or routing_mode == "multi_node") and target_country:
-                        available_candidates = [n for n in available_candidates if n.get("country") == target_country]
-                    # IP 类型过滤 (严格锁定模式)
-                    if target_ip_type and routing_mode != "fixed_ip":
-                        available_candidates = [n for n in available_candidates if n.get("ip_type") == target_ip_type]
-                    
-                    if available_candidates:
-                        auto_switch_node()
+                    print("[维护线程] 已完成节点更新与测速，未自动连接主出口。请在网页中手动选择节点连接。", flush=True)
+                    log_to_json("INFO", "VPN", "已完成节点更新与测速，等待用户手动选择主出口")
 
         valid_nodes_count = len([n for n in merged if n.get("probe_status") == "available"])
         message = f"Fetched {len(candidates)} nodes. Tested first 10 nodes."
