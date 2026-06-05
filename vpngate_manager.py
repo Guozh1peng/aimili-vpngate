@@ -185,6 +185,11 @@ def load_ui_config() -> dict[str, Any]:
                     config[key] = val
             except Exception:
                 pass
+
+        for obsolete_key in ("routing_mode", "force_country", "force_ip_type", "multi_node_count", "enable_force_country"):
+            if obsolete_key in config:
+                config.pop(obsolete_key, None)
+                updated = True
         
         if not config.get("username"):
             config["username"] = generate_random_username()
@@ -281,10 +286,6 @@ def get_state() -> dict[str, Any]:
     state["username"] = ui_cfg.get("username", "admin")
     state["port"] = ui_cfg.get("port", 8787)
     state["secret_path"] = ui_cfg.get("secret_path", "EJsW2EeBo9lY")
-    state["routing_mode"] = ui_cfg.get("routing_mode", "auto")
-    state["force_country"] = ui_cfg.get("force_country", "")
-    state["force_ip_type"] = ui_cfg.get("force_ip_type", "")
-    state["multi_node_count"] = ui_cfg.get("multi_node_count", 3)
     
     # 包含多出口代理实例信息
     m_instances = []
@@ -299,7 +300,11 @@ def get_state() -> dict[str, Any]:
                 "ip": inst.get("ip"),
                 "location": inst.get("location"),
                 "ip_type": inst.get("ip_type"),
-                "managed_config": inst.get("managed_config")
+                "managed_config": inst.get("managed_config"),
+                "exit_ok": inst.get("exit_ok"),
+                "exit_ip": inst.get("exit_ip"),
+                "exit_latency": inst.get("exit_latency"),
+                "exit_error": inst.get("exit_error"),
             })
     state["multi_proxies"] = m_instances
     
@@ -2682,10 +2687,6 @@ INDEX_HTML = r"""<!doctype html>
           <svg xmlns="http://www.w3.org/2000/svg" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
           账号密码设置
         </a>
-        <a href="javascript:void(0)" onclick="openNetworkModal()">
-          <svg xmlns="http://www.w3.org/2000/svg" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-          代理及网络设置
-        </a>
         <a href="javascript:void(0)" onclick="openGatewayModal()">
           <svg xmlns="http://www.w3.org/2000/svg" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
           网关
@@ -2824,85 +2825,6 @@ INDEX_HTML = r"""<!doctype html>
         <div style="display: flex; gap: 12px; justify-content: flex-end;">
           <button type="button" onclick="closeCredentialsModal()" style="height: 40px; padding: 0 16px; font-weight: 600; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); cursor: pointer;">取消</button>
           <button type="submit" id="credentials_submit_btn" class="btn-primary" style="height: 40px; padding: 0 20px; font-weight: 600; border-radius: 8px;">保存修改</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- Network Modal (代理及网络设置，包括出站路由) -->
-  <div id="network_modal" class="modal">
-    <div class="modal-content" style="max-width: 480px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-        <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
-          <svg xmlns="http://www.w3.org/2000/svg" style="width:20px; height:20px; color: var(--primary);" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-          代理与网络设置
-        </h3>
-        <button type="button" onclick="closeNetworkModal()" style="background: transparent; border: none; padding: 4px; cursor: pointer; color: var(--text-secondary); width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
-          <svg xmlns="http://www.w3.org/2000/svg" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-        </button>
-      </div>
-      
-      <div id="network_error" style="color: var(--danger); font-size: 13px; margin-bottom: 16px; padding: 8px 12px; background: rgba(244,63,94,0.1); border: 1px solid rgba(244,63,94,0.2); border-radius: 6px; display: none;"></div>
-      <div id="network_success" style="color: var(--success); font-size: 13px; margin-bottom: 16px; padding: 8px 12px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); border-radius: 6px; display: none;"></div>
-
-      <form id="network_form" onsubmit="saveNetwork(event)">
-        <div class="form-group" style="margin-bottom: 12px;">
-          <label class="form-label" for="net_port">网页管理端口</label>
-          <input type="number" id="net_port" class="input-field" required min="1" max="65535" placeholder="8787">
-        </div>
-        
-        <div class="form-group" style="margin-bottom: 12px;">
-          <label class="form-label" for="net_suffix">登录安全后缀 (仅字母和数字)</label>
-          <input type="text" id="net_suffix" class="input-field" required pattern="[A-Za-z0-9]+" placeholder="EJsW2EeBo9lY">
-        </div>
-
-        <div class="form-group" style="margin-bottom: 16px;">
-          <label class="form-label" for="net_proxy_port">HTTP/SOCKS5 代理出站端口</label>
-          <input type="number" id="net_proxy_port" class="input-field" required min="1024" max="65535" placeholder="7928">
-        </div>
-
-        <div style="border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 16px; margin-bottom: 16px;">
-          <div class="form-group" style="margin-bottom: 12px;">
-            <label class="form-label" for="net_routing_mode">IP 出站路由模式</label>
-            <select id="net_routing_mode" class="input-field" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; cursor: pointer; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;" onchange="handleRoutingModeChange(this.value)">
-              <option value="auto">自动配置 (智能切换，最稳定)</option>
-              <option value="fixed_ip">固定 IP (永不自动换 IP)</option>
-              <option value="fixed_region">固定地区 (锁定特定国家节点)</option>
-              <option value="multi_node">多节点模式 (自动并发维护多个连接)</option>
-            </select>
-          </div>
-          
-          <div id="net_force_country_group" class="form-group" style="margin-bottom: 12px; display: none;">
-            <label class="form-label" for="net_force_country">锁定国家地区</label>
-            <select id="net_force_country" class="input-field" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; cursor: pointer; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
-              <option value="">正在加载节点国家...</option>
-            </select>
-          </div>
-
-          <div id="net_multi_node_count_group" class="form-group" style="margin-bottom: 12px; display: none;">
-            <label class="form-label" for="net_multi_node_count">多节点并发数量 (1-8)</label>
-            <input type="number" id="net_multi_node_count" class="input-field" min="1" max="8" value="3" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
-          </div>
-          
-          <div id="net_force_ip_type_group" class="form-group" style="margin-bottom: 12px; display: none;">
-            <label class="form-label" for="net_force_ip_type">偏好 IP 类型 (可选)</label>
-            <select id="net_force_ip_type" class="input-field" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; cursor: pointer; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
-              <option value="">不限制 (所有类型)</option>
-              <option value="residential">住宅 IP (Residential)</option>
-              <option value="hosting">机房 IP (Hosting/Datacenter)</option>
-              <option value="mobile">移动网 (Mobile)</option>
-              <option value="proxy">代理 IP (Proxy)</option>
-            </select>
-          </div>
-          
-          <div id="net_routing_warning" style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; padding: 8px 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; margin-top: 8px;">
-            ℹ️ <strong>自动配置</strong>：全自动测试并选择最佳IP。在使用过程中，如果当前连接节点没有失效，将不再更换IP；如果当前节点失效，系统将立刻秒级自动漂移到其他最快的可用节点。
-          </div>
-        </div>
-        
-        <div style="display: flex; gap: 12px; justify-content: flex-end;">
-          <button type="button" onclick="closeNetworkModal()" style="height: 40px; padding: 0 16px; font-weight: 600; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); cursor: pointer;">取消</button>
-          <button type="submit" id="network_submit_btn" class="btn-primary" style="height: 40px; padding: 0 20px; font-weight: 600; border-radius: 8px;">保存修改</button>
         </div>
       </form>
     </div>
@@ -5129,7 +5051,7 @@ def multi_node_manager_loop() -> None:
             for inst_id in current_instances:
                 inst = multi_proxy_instances.get(inst_id)
                 if not inst: continue
-                
+
                 # 获取该实例的锁定条件：优先使用实例自身的托管配置，否则在全局多节点模式下使用全局配置
                 managed_cfg = inst.get("managed_config")
                 if managed_cfg:
@@ -5139,7 +5061,6 @@ def multi_node_manager_loop() -> None:
                     current_target_country = target_country
                     current_target_ip_type = target_ip_type
                 else:
-                    # 非多节点模式且无独立配置，不进行规则维护（仅进行基本健康检查，由 checker 线程负责，这里跳过或可选处理）
                     current_target_country = None
                     current_target_ip_type = None
 
@@ -5154,38 +5075,32 @@ def multi_node_manager_loop() -> None:
                     print(f"[多节点管理器] 实例 {inst_id} 不符合 IP 类型锁定条件 ({current_target_ip_type})，正在移除并准备更换...", flush=True)
                     should_terminate = True
 
-                # 检测连通性 (仅针对托管实例或全局多节点模式下的实例)
-                if not should_terminate and (managed_cfg or routing_mode == "multi_node"):
-                    port = inst.get("proxy_port")
+                # 检测连通性。手动创建的多出口实例也必须检测，否则 7929/7930
+                # 这类端口失效后不会自动漂移。
+                if not should_terminate:
+                    port = parse_int(inst.get("proxy_port"))
                     health = check_proxy_health_by_port(port)
-                    if not health["ok"]:
+                    if health.get("ok"):
+                        inst["exit_ok"] = True
+                        inst["exit_ip"] = health.get("ip", "")
+                        inst["exit_latency"] = health.get("latency_ms", 0)
+                        inst["exit_error"] = ""
+                    else:
+                        inst["exit_ok"] = False
+                        inst["exit_ip"] = "-"
+                        inst["exit_latency"] = 0
+                        inst["exit_error"] = health.get("error", "未知错误")
                         print(f"[多节点管理器] 实例 {inst_id} (端口 {port}) 连通性检测失败: {health.get('error')}，正在准备更换...", flush=True)
                         should_terminate = True
                 
                 if should_terminate:
-                    stop_multi_proxy_instance(inst_id)
-                    # 如果是手动设置了 managed_config 的实例，需要立即补齐
-                    if managed_cfg:
-                        # 查找合适的节点补齐这个特定端口
-                        nodes = read_json(NODES_FILE, [])
-                        used_node_ids = {i.get("node_id") for i in multi_proxy_instances.values() if i.get("node_id")}
-                        if active_openvpn_node_id: used_node_ids.add(active_openvpn_node_id)
-                        
-                        candidates = [n for n in nodes if n.get("probe_status") == "available" and not n.get("active") and n.get("id") not in used_node_ids]
-                        if current_target_country:
-                            candidates = [n for n in candidates if n.get("country") == current_target_country]
-                        if current_target_ip_type:
-                            candidates = [n for n in candidates if n.get("ip_type") == current_target_ip_type]
-                        
-                        candidates.sort(key=lambda n: (parse_int(n.get("latency_ms")) or 999999, -parse_int(n.get("score"))))
-                        
-                        if candidates:
-                            new_node = candidates[0]
-                            # 保持原有的端口和 TUN 索引（通过 get_next 逻辑会自动找到空闲的，但由于刚停掉，可能需要稍微等一下或直接复用信息）
-                            # 为简单起见，直接再次使用 start 逻辑
-                            p_port = inst.get("proxy_port") or get_next_proxy_port()
-                            t_dev = inst.get("tun_device") or f"tun{get_next_tun_index()}"
-                            start_multi_proxy_instance(inst_id, new_node['id'], p_port, t_dev, managed_config=managed_cfg)
+                    try:
+                        msg = switch_multi_proxy_instance(inst_id)
+                        print(f"[多节点管理器] {msg}", flush=True)
+                    except Exception as exc:
+                        err_msg = f"实例 {inst_id} 自动更换失败，将保留原实例并在下一轮继续尝试: {exc}"
+                        print(f"[多节点管理器] {err_msg}", flush=True)
+                        log_to_json("WARNING", "MultiProxy", err_msg)
 
             # --- 第二阶段：全局多节点模式下的自动补齐 ---
             if routing_mode == "multi_node":
@@ -5349,7 +5264,11 @@ class Handler(BaseHTTPRequestHandler):
                     "ip": inst.get("ip"),
                     "location": inst.get("location"),
                     "ip_type": inst.get("ip_type"),
-                    "managed_config": inst.get("managed_config")
+                    "managed_config": inst.get("managed_config"),
+                    "exit_ok": inst.get("exit_ok"),
+                    "exit_ip": inst.get("exit_ip"),
+                    "exit_latency": inst.get("exit_latency"),
+                    "exit_error": inst.get("exit_error"),
                 }
                 for inst_id, inst in multi_proxy_instances.items()
             ]
