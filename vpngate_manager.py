@@ -4574,11 +4574,11 @@ function filterAndRenderLogs() {
   
   let filtered = rawLogsCache;
   if (filterVal === "proxy") {
-    filtered = rawLogsCache.filter(l => l.module === "Proxy");
+    filtered = rawLogsCache.filter(l => ["Proxy", "MultiProxy"].includes(l.module));
   } else if (filterVal === "vpn") {
     filtered = rawLogsCache.filter(l => l.module === "VPN");
   } else if (filterVal === "system") {
-    filtered = rawLogsCache.filter(l => !["Proxy", "VPN"].includes(l.module));
+    filtered = rawLogsCache.filter(l => !["Proxy", "MultiProxy", "VPN"].includes(l.module));
   }
   
   if (filtered.length === 0) {
@@ -4589,6 +4589,7 @@ function filterAndRenderLogs() {
   const linesHtml = filtered.map(l => {
     let color = "#a5b4fc";
     if (l.module === "Proxy") color = "#38bdf8";
+    if (l.module === "MultiProxy") color = "#22d3ee";
     if (l.module === "VPN") color = "#34d399";
     if (l.level === "WARNING") color = "#fbbf24";
     if (l.level === "ERROR") color = "#f43f5e";
@@ -5182,12 +5183,14 @@ def multi_node_manager_loop() -> None:
                         inst["exit_ip"] = health.get("ip", "")
                         inst["exit_latency"] = health.get("latency_ms", 0)
                         inst["exit_error"] = ""
+                        log_to_json("INFO", "MultiProxy", f"多出口实例 {inst_id} (端口 {port}) 30秒检测正常，出口 IP: {inst['exit_ip']}，延迟: {inst['exit_latency']} ms")
                     else:
                         inst["exit_ok"] = False
                         inst["exit_ip"] = "-"
                         inst["exit_latency"] = 0
                         inst["exit_error"] = health.get("error", "未知错误")
                         print(f"[多节点管理器] 实例 {inst_id} (端口 {port}) 连通性检测失败: {health.get('error')}，正在准备更换...", flush=True)
+                        log_to_json("WARNING", "MultiProxy", f"多出口实例 {inst_id} (端口 {port}) 30秒检测失败: {inst['exit_error']}，正在准备更换")
                         should_terminate = True
                 
                 if should_terminate:
