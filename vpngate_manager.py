@@ -175,7 +175,12 @@ def load_ui_config() -> dict[str, Any]:
             "secret_path": "EJsW2EeBo9lY",
             "password": "",
             "host": "::",
-            "port": 8787
+            "port": 8787,
+            "proxy_port": LOCAL_PROXY_PORT,
+            "routing_mode": "auto",
+            "force_country": "",
+            "force_ip_type": "",
+            "multi_node_count": 3
         }
         updated = False
         if auth_file.exists():
@@ -186,7 +191,7 @@ def load_ui_config() -> dict[str, Any]:
             except Exception:
                 pass
 
-        for obsolete_key in ("routing_mode", "force_country", "force_ip_type", "multi_node_count", "enable_force_country"):
+        for obsolete_key in ("enable_force_country",):
             if obsolete_key in config:
                 config.pop(obsolete_key, None)
                 updated = True
@@ -286,6 +291,11 @@ def get_state() -> dict[str, Any]:
     state["username"] = ui_cfg.get("username", "admin")
     state["port"] = ui_cfg.get("port", 8787)
     state["secret_path"] = ui_cfg.get("secret_path", "EJsW2EeBo9lY")
+    state["proxy_port"] = ui_cfg.get("proxy_port", LOCAL_PROXY_PORT)
+    state["routing_mode"] = ui_cfg.get("routing_mode", "auto")
+    state["force_country"] = ui_cfg.get("force_country", "")
+    state["force_ip_type"] = ui_cfg.get("force_ip_type", "")
+    state["multi_node_count"] = ui_cfg.get("multi_node_count", 3)
     
     # 包含多出口代理实例信息
     m_instances = []
@@ -2830,6 +2840,85 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
 
+  <!-- Network Modal (代理及网络设置，包括主出口锁定规则) -->
+  <div id="network_modal" class="modal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width:20px; height:20px; color: var(--primary);" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          主出口锁定设置
+        </h3>
+        <button type="button" onclick="closeNetworkModal()" style="background: transparent; border: none; padding: 4px; cursor: pointer; color: var(--text-secondary); width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
+          <svg xmlns="http://www.w3.org/2000/svg" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+
+      <div id="network_error" style="color: var(--danger); font-size: 13px; margin-bottom: 16px; padding: 8px 12px; background: rgba(244,63,94,0.1); border: 1px solid rgba(244,63,94,0.2); border-radius: 6px; display: none;"></div>
+      <div id="network_success" style="color: var(--success); font-size: 13px; margin-bottom: 16px; padding: 8px 12px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); border-radius: 6px; display: none;"></div>
+
+      <form id="network_form" onsubmit="saveNetwork(event)">
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label" for="net_port">网页管理端口</label>
+          <input type="number" id="net_port" class="input-field" required min="1" max="65535" placeholder="8787">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label" for="net_suffix">登录安全后缀 (仅字母和数字)</label>
+          <input type="text" id="net_suffix" class="input-field" required pattern="[A-Za-z0-9]+" placeholder="EJsW2EeBo9lY">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="form-label" for="net_proxy_port">HTTP/SOCKS5 代理出站端口</label>
+          <input type="number" id="net_proxy_port" class="input-field" required min="1024" max="65535" placeholder="7928">
+        </div>
+
+        <div style="border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 16px; margin-bottom: 16px;">
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label class="form-label" for="net_routing_mode">IP 出站路由模式</label>
+            <select id="net_routing_mode" class="input-field" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; cursor: pointer; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;" onchange="handleRoutingModeChange(this.value)">
+              <option value="auto">自动配置 (智能切换，最稳定)</option>
+              <option value="fixed_ip">固定 IP (永不自动换 IP)</option>
+              <option value="fixed_region">固定地区 (锁定特定国家节点)</option>
+              <option value="multi_node">多节点模式 (自动并发维护多个连接)</option>
+            </select>
+          </div>
+
+          <div id="net_force_country_group" class="form-group" style="margin-bottom: 12px; display: none;">
+            <label class="form-label" for="net_force_country">锁定国家地区</label>
+            <select id="net_force_country" class="input-field" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; cursor: pointer; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
+              <option value="">正在加载节点国家...</option>
+            </select>
+          </div>
+
+          <div id="net_multi_node_count_group" class="form-group" style="margin-bottom: 12px; display: none;">
+            <label class="form-label" for="net_multi_node_count">多节点并发数量 (1-8)</label>
+            <input type="number" id="net_multi_node_count" class="input-field" min="1" max="8" value="3" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
+          </div>
+
+          <div id="net_force_ip_type_group" class="form-group" style="margin-bottom: 12px; display: none;">
+            <label class="form-label" for="net_force_ip_type">偏好 IP 类型 (可选)</label>
+            <select id="net_force_ip_type" class="input-field" style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); color: var(--text-primary); outline: none; cursor: pointer; width: 100%; height: 40px; border-radius: 8px; padding: 0 12px;">
+              <option value="">不限制 (所有类型)</option>
+              <option value="residential">住宅 IP (Residential)</option>
+              <option value="hosting">机房 IP (Hosting/Datacenter)</option>
+              <option value="mobile">移动网 (Mobile)</option>
+              <option value="proxy">代理 IP (Proxy)</option>
+            </select>
+          </div>
+
+          <div id="net_routing_warning" style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; padding: 8px 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; margin-top: 8px;">
+            <strong>自动配置</strong>：全自动测试并选择最佳 IP。当前节点正常时不更换；当前节点失效时自动漂移到其他最快可用节点。
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 12px; justify-content: flex-end;">
+          <button type="button" onclick="closeNetworkModal()" style="height: 40px; padding: 0 16px; font-weight: 600; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); cursor: pointer;">取消</button>
+          <button type="submit" id="network_submit_btn" class="btn-primary" style="height: 40px; padding: 0 20px; font-weight: 600; border-radius: 8px;">保存修改</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Instance Modal (特定实例锁定设置) -->
   <div id="instance_modal" class="modal">
     <div class="modal-content" style="max-width: 400px;">
@@ -3847,6 +3936,7 @@ function handleRoutingModeChange(mode) {
   const ipTypeGroup = $("net_force_ip_type_group");
   const multiNodeGroup = $("net_multi_node_count_group");
   const warningDiv = $("net_routing_warning");
+  if (!countryGroup || !ipTypeGroup || !multiNodeGroup || !warningDiv) return;
 
   if (mode === "multi_node") {
     countryGroup.style.display = "block";
@@ -3915,7 +4005,8 @@ function populateRoutingCountries() {
     const mode = state.routing_mode || "auto";
     const modeSelect = $("net_routing_mode");
     if (modeSelect) modeSelect.value = mode;
-    $("net_force_country").value = state.force_country || "";
+    const countrySelect = $("net_force_country");
+    if (countrySelect) countrySelect.value = state.force_country || "";
     const ipTypeSelect = $("net_force_ip_type");
     if (ipTypeSelect) ipTypeSelect.value = state.force_ip_type || "";
     handleRoutingModeChange(mode);
@@ -4046,9 +4137,15 @@ async function saveCredentials(e) {
 }
 
 function openNetworkModal() {
+  const modal = $("network_modal");
+  const form = $("network_form");
+  if (!modal || !form) {
+    alert("主出口锁定设置面板未加载，请刷新页面后重试。");
+    return;
+  }
   $("network_error").style.display = "none";
   $("network_success").style.display = "none";
-  $("network_form").reset();
+  form.reset();
   
   if (state) {
     $("net_port").value = state.port || 8787;
@@ -4059,12 +4156,12 @@ function openNetworkModal() {
   
   populateRoutingCountries();
   handleRoutingModeChange($("net_routing_mode").value);
-  $("network_modal").style.display = "flex";
-  $("admin_dropdown").style.display = "none";
+  modal.style.display = "flex";
+  if ($("admin_dropdown")) $("admin_dropdown").style.display = "none";
 }
 
 function closeNetworkModal() {
-  $("network_modal").style.display = "none";
+  if ($("network_modal")) $("network_modal").style.display = "none";
 }
 
 async function saveNetwork(e) {
